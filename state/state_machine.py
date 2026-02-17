@@ -20,6 +20,14 @@ log = logging.getLogger(__name__)
 _pet_mod = importlib.import_module("display.pet-state-model")
 PetState = _pet_mod.PetState
 
+# Import camera capture service
+_cam_mod = importlib.import_module("hardware.camera-capture-service")
+CameraCaptureService = _cam_mod.CameraCaptureService
+
+# Import vision analysis service (direct Gemini from Pi)
+_vision_mod = importlib.import_module("hardware.vision-analysis-service")
+VisionAnalysisService = _vision_mod.VisionAnalysisService
+
 
 class State(enum.Enum):
     IDLE = "idle"
@@ -59,10 +67,24 @@ class StateMachine:
         self._tokens = []
         self._turn_user_text = ""
         self._turn_start_time = 0
+        self._last_bubble_text = None
 
         # Pet state for compositor rendering (guarded by _pet_lock)
         self._pet_state = PetState()
         self._pet_lock = threading.Lock()
+
+        # Camera: double-press detection (guarded by _press_lock)
+        self._camera = None
+        self._last_press_time = 0.0
+        self._press_pending = False  # True = waiting to see if double-press
+        self._press_timer = None
+        self._press_lock = threading.Lock()
+        self._vision = None
+        if config.CAMERA_ENABLED:
+            self._camera = CameraCaptureService(min_interval_s=config.CAMERA_RATE_LIMIT_S)
+            self._camera.initialize()
+        if config.VISION_ENABLED:
+            self._vision = VisionAnalysisService()
 
         self._register_callbacks()
 
@@ -80,6 +102,7 @@ class StateMachine:
         self._ws.on_interrupt_ack = self._on_interrupt_ack
         self._ws.on_disconnect = self._on_disconnect
         self._ws.on_reconnect = self._on_reconnect
+        self._ws.on_pet_feed_result = self._on_pet_feed_result
 
     _LED_MAP = {
         State.IDLE: config.LED_IDLE, State.LISTENING: config.LED_LISTENING,
@@ -111,10 +134,80 @@ class StateMachine:
             self._capture.stop()
 
     def _on_button_press(self):
+        if self._state == State.ANSWER:
+            self._interrupt()
+            return
+
+        if self._state != State.IDLE:
+            return
+
+        with self._press_lock:
+            now = time.time()
+            elapsed_ms = (now - self._last_press_time) * 1000
+            self._last_press_time = now
+
+            # Double-press detected -> camera capture
+            if self._press_pending and elapsed_ms < config.CAMERA_DOUBLE_PRESS_MS:
+                self._press_pending = False
+                if self._press_timer:
+                    self._press_timer.cancel()
+                    self._press_timer = None
+                self._trigger_camera()
+                return
+
+            # First press -> wait to see if double-press follows
+            self._press_pending = True
+            delay_s = config.CAMERA_DOUBLE_PRESS_MS / 1000.0
+            self._press_timer = threading.Timer(delay_s, self._on_single_press_confirmed)
+            self._press_timer.daemon = True
+            self._press_timer.start()
+
+    def _on_single_press_confirmed(self):
+        """Called after double-press window expires -> treat as single press (talk)."""
+        with self._press_lock:
+            self._press_pending = False
+            self._press_timer = None
         if self._state == State.IDLE:
             self._start_listening()
-        elif self._state == State.ANSWER:
-            self._interrupt()
+
+    def _trigger_camera(self):
+        """Capture photo and analyze directly via Gemini on Pi."""
+        if not self._camera or not self._camera.available:
+            log.warning("Camera not available")
+            return
+
+        if not self._vision or not self._vision.available:
+            log.warning("Vision service not available")
+            return
+
+        self._hat.set_rgb_tuple(config.LED_CAMERA)
+        log.info("Camera capture triggered (double-press)")
+
+        def _capture_and_analyze():
+            jpeg_bytes = self._camera.capture_bytes()
+            if not jpeg_bytes:
+                log.warning("Camera capture returned None")
+                self._hat.set_rgb_tuple(config.LED_IDLE)
+                return
+
+            result = self._vision.analyze(jpeg_bytes)
+            self._hat.set_rgb_tuple(config.LED_IDLE)
+
+            if result is None:
+                self._last_bubble_text = "Mình không thấy rõ, thử lại nhé!"
+                return
+
+            if result.get("is_food") and result.get("food_name"):
+                food = result["food_name"]
+                log.info("Food detected: %s", food)
+                self._last_bubble_text = food + " ngon quá! Cho mình ăn nhé?"
+                self._ws.send_feed_confirm(food)
+            else:
+                desc = result.get("description", "")
+                log.info("Non-food: %s", desc)
+                self._last_bubble_text = desc
+
+        threading.Thread(target=_capture_and_analyze, daemon=True).start()
 
     def _on_button_release(self):
         if self._state == State.LISTENING:
@@ -123,6 +216,7 @@ class StateMachine:
     def _start_listening(self):
         self._set_state(State.LISTENING)
         self._tokens = []
+        self._last_bubble_text = None
         self._turn_start_time = time.time()
         self._ws.send_audio_start()
         self._capture.start()
@@ -197,6 +291,17 @@ class StateMachine:
     def _on_interrupt_ack(self):
         pass
 
+    def _on_pet_feed_result(self, success, food_name, hunger_reduction):
+        """Handle feed result after camera food confirmation."""
+        if success:
+            log.info("Fed with %s (hunger -%d)", food_name, hunger_reduction)
+            # Trigger eating animation briefly
+            self._pet_state.animation = "eating"
+            self._emotion_tick = 0
+            self._set_state(State.EMOTION)
+        else:
+            log.warning("Feed failed for %s", food_name)
+
     def _on_disconnect(self):
         self._ensure_mic_off()
         self._playback.stop()
@@ -207,8 +312,8 @@ class StateMachine:
         self._ws.send_hello()
 
     def _reconnect_loop(self):
-        if self._ws.reconnect():
-            self._ws.send_hello()
+        self._ws.reconnect()
+        # hello is sent by _on_reconnect callback, no need to send again
 
     def tick(self):
         """Called once per frame (30 FPS). Updates display for current state."""
@@ -222,8 +327,14 @@ class StateMachine:
         if state == State.EMOTION:
             self._emotion_tick += 1
 
-        # Build text for speech bubble (only during ANSWER)
-        text = "".join(self._tokens) if state == State.ANSWER else None
+        # Build text for speech bubble — persist through ANSWER, EMOTION, and IDLE
+        # until next LISTENING clears it
+        if state == State.ANSWER:
+            if self._pet_state.stage in ("egg", "EGG"):
+                self._last_bubble_text = "❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️..."
+            else:
+                self._last_bubble_text = "".join(self._tokens)
+        text = self._last_bubble_text if state in (State.ANSWER, State.EMOTION, State.IDLE) else None
 
         # Snapshot pet state under lock to avoid torn reads from WS thread
         with self._pet_lock:
@@ -234,7 +345,8 @@ class StateMachine:
 
         done = self._display.render(render_tick, pet_snapshot, text)
 
-        if state == State.EMOTION and done:
+        # Return to IDLE when emotion animation completes or after 3s timeout
+        if state == State.EMOTION and (done or self._emotion_tick > 90):
             self._set_state(State.IDLE)
 
     def update_pet_state(self, **kwargs):

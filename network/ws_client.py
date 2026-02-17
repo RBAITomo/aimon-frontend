@@ -37,6 +37,8 @@ class WSClient:
         self.on_interrupt_ack = None
         self.on_disconnect = None
         self.on_reconnect = None
+        self.on_camera_result = None
+        self.on_pet_feed_result = None
 
     def connect(self):
         url = f"{config.BACKEND_WS_URL}/ws/audio/{config.ROBOT_ID}"
@@ -128,6 +130,10 @@ class WSClient:
     def send_interrupt(self):
         self._send_json({"type": "interrupt"})
 
+    def send_feed_confirm(self, food_name="unknown"):
+        """Confirm feeding after food detection (food analyzed on Pi)."""
+        self._send_json({"type": "pet_feed_confirm", "food_name": food_name})
+
     def send_ping(self):
         self._send_json({"type": "ping"})
 
@@ -203,6 +209,23 @@ class WSClient:
         elif msg_type == "interrupt_ack":
             if self.on_interrupt_ack:
                 self.on_interrupt_ack()
+
+        elif msg_type == "camera_result":
+            if self.on_camera_result:
+                self.on_camera_result(
+                    msg.get("is_food", False),
+                    msg.get("food_name"),
+                    msg.get("description", ""),
+                    msg.get("prompt"),
+                )
+
+        elif msg_type == "pet_feed_result":
+            if self.on_pet_feed_result:
+                self.on_pet_feed_result(
+                    msg.get("success", False),
+                    msg.get("food_name"),
+                    msg.get("hunger_reduction", 0),
+                )
 
         elif msg_type == "pong":
             log.debug("Pong received")

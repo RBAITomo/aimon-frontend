@@ -104,3 +104,14 @@ LED_ANSWER = (0, 180, 200)  # cyan
 LED_EMOTION_HAPPY = (255, 200, 0)  # warm yellow
 LED_EMOTION_SAD = (80, 80, 200)  # blue
 LED_OFFLINE = (200, 30, 30)  # red
+
+# --- Camera ---
+CAMERA_ENABLED = os.getenv("CAMERA_ENABLED", "true").lower() == "true"
+CAMERA_RATE_LIMIT_S = 30  # min seconds between captures
+CAMERA_DOUBLE_PRESS_MS = 500  # max ms between presses for double-press detection
+LED_CAMERA = (200, 100, 255)  # purple — camera capture in progress
+
+# --- Gemini Vision (direct from Pi) ---
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+VISION_ENABLED = bool(GEMINI_API_KEY) and CAMERA_ENABLED
