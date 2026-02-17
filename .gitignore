@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+*.db
+sprites/idle/*.png
+sprites/listening/*.png
+sprites/thinking/*.png
+sprites/happy/*.png
+sprites/sad/*.png

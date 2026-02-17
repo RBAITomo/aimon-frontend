@@ -1,0 +1,19 @@
+[Unit]
+Description=AI-MON Frontend (Pygame + Whisplay HAT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/aimon-frontend
+Environment=SDL_VIDEODRIVER=fbcon
+Environment=SDL_FBDEV=/dev/fb0
+Environment=BACKEND_WS_URL=ws://localhost:8080
+Environment=ROBOT_ID=robot001
+ExecStart=/home/pi/aimon-frontend/.venv/bin/python3 main.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

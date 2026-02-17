@@ -1,0 +1,7 @@
+{
+  "idle": { "fps": 5, "loop": true },
+  "listening": { "fps": 15, "loop": true },
+  "thinking": { "fps": 8, "loop": true },
+  "happy": { "fps": 10, "loop": false },
+  "sad": { "fps": 8, "loop": false }
+}
