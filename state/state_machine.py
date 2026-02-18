@@ -56,7 +56,7 @@ class State(enum.Enum):
 _STATE_ANIMATION_MAP = {
     State.IDLE: "idle",
     State.LISTENING: "listening",
-    State.ASR: "idle",          # keep idle during thinking
+    State.ASR: "warning",       # thinking animation while waiting for TTS
     State.ANSWER: "speaking",
     State.EMOTION: "happy",     # overridden by _current_emotion
     State.OFFLINE: "idle",
@@ -445,9 +445,8 @@ class StateMachine:
         if state == State.EMOTION and (done or self._emotion_tick > 90):
             self._set_state(State.IDLE)
 
-        # Clear quest text when child starts listening (answered the quest)
-        if state == State.LISTENING and quest:
-            self._pet_handler.clear_quest()
+        # Quest clears server-side via pet_status (not on LISTENING)
+        # Child may need multiple attempts, quest persists until answered correctly
 
     def _enter_evolution(self):
         """Consume pending evolution event and enter EVOLUTION state."""

@@ -52,6 +52,17 @@ class PetEventHandler:
                 self._pet_state.stage = raw_stage.lower() if isinstance(raw_stage, str) else raw_stage
                 self._pet_state.variant = data.get("variant", self._pet_state.variant)
             self._pet_state.mood = data.get("mood", self._pet_state.mood)
+
+        # Parse quest from pet_status (reconnect/refresh scenario)
+        quest = data.get("quest")
+        if quest and quest.get("text"):
+            self._quest_text = quest["text"]
+            log.debug("Quest restored from pet_status: %s", self._quest_text[:50])
+        elif quest is None and self._quest_text:
+            # Server confirms quest answered — clear display
+            self._quest_text = None
+            log.debug("Quest cleared (answered)")
+
         self._display.on_stats_changed()
         log.debug("Pet status updated: lvl=%d stage=%s", self._pet_state.level, self._pet_state.stage)
 
@@ -114,8 +125,8 @@ class PetEventHandler:
     def on_quest_start(self, data):
         """Display quest question — child answers via normal voice flow."""
         self._sfx.play("quest")
-        self._quest_text = data.get("question", "")
-        log.info("Quest started: %s", self._quest_text[:50])
+        self._quest_text = data.get("quest_text", data.get("question", ""))
+        log.info("Quest started: %s", self._quest_text[:50] if self._quest_text else "empty")
 
     def on_camera_result(self, data):
         """Handle camera analysis result from backend (legacy path)."""
