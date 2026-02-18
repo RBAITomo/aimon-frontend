@@ -119,9 +119,9 @@ sudo apt-get install -y \
     portaudio19-dev \
     libopus-dev libopus0 \
     libasound2-dev \
-    libspidev-dev
+    libspidev-dev \
+    python3-rpi-lgpio
 ```
-
 ### Step 2: Enable SPI
 
 ```bash

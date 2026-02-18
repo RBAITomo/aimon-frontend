@@ -39,10 +39,11 @@ def main():
     from hardware.whisplay_hat import WhisplayHAT
     hat = WhisplayHAT()
 
-    # --- Initialize Pygame subsystems (rendering only, no window) ---
+    # --- Initialize Pygame subsystems (rendering + audio mixer) ---
     pygame.display.init()
     pygame.display.set_mode((1, 1))  # minimal surface for dummy driver
     pygame.font.init()
+    pygame.mixer.init()
     clock = pygame.time.Clock()
 
     # --- Initialize display engine ---

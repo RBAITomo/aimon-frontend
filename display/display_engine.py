@@ -43,13 +43,14 @@ class DisplayEngine:
 
         log.info("DisplayEngine initialized (%dx%d)", config.LCD_WIDTH, config.LCD_HEIGHT)
 
-    def render(self, tick, pet_state, text=None):
+    def render(self, tick, pet_state, text=None, badge_popup=None):
         """Main render call — delegates to compositor.
 
         Args:
             tick: Animation tick counter.
             pet_state: PetState dataclass with all rendering data.
             text: Optional speech bubble text.
+            badge_popup: Optional BadgePopupRenderer to overlay on top.
 
         Returns:
             bool: True if current animation finished.
@@ -57,6 +58,8 @@ class DisplayEngine:
         done = self._compositor.render_frame(
             self._surface, tick, pet_state, text
         )
+        if badge_popup:
+            badge_popup.render(self._surface, tick)
         self._blit_to_lcd()
         return done
 
@@ -93,9 +96,47 @@ class DisplayEngine:
             y += 22
         self._blit_to_lcd()
 
+    def render_evolution(self, tick, pet_state):
+        """Render evolution flash sequence on top of compositor frame.
+
+        3 white flash pulses over 90 frames (3s at 30fps).
+        Returns True when the flash is complete (transition to hold phase).
+        """
+        FLASH_DURATION = 90
+        self._compositor.render_frame(self._surface, tick, pet_state, None)
+
+        if tick <= FLASH_DURATION:
+            # sin-wave alpha per 30-frame pulse: 0 → 220 → 0
+            pulse_tick = tick % 30
+            alpha = int(220 * math.sin(pulse_tick / 30.0 * math.pi))
+            if alpha > 0:
+                flash = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT))
+                flash.fill((255, 255, 255))
+                flash.set_alpha(alpha)
+                self._surface.blit(flash, (0, 0))
+
+        self._blit_to_lcd()
+        return tick >= FLASH_DURATION
+
+    def preload_stage(self, stage):
+        """Preload sprites for a stage without switching to it yet."""
+        self._compositor.preload_stage(stage)
+
+    def set_black_background(self):
+        """Black out display for evolution sequence."""
+        self._compositor.set_black_background()
+
+    def clear_black_background(self):
+        """Restore normal background rendering after evolution."""
+        self._compositor.clear_black_background()
+
     def reset_scroll(self):
         """Reset speech bubble scroll position."""
         self._compositor.reset_bubble()
+
+    def set_background(self, bg_name):
+        """Set background image by filename from backgrounds/ directory."""
+        self._compositor.set_background(bg_name)
 
     def on_stats_changed(self):
         """Notify compositor that stats changed (forces base rebuild)."""

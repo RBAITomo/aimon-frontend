@@ -98,6 +98,6 @@ class VisionAnalysisService:
 
         except Exception as e:
             log.error("Vision analysis failed: %s", e)
-            # Restore last_call so failed attempts don't waste rate limit
-            self._last_call = 0.0
+            # Short penalty to prevent rapid retry on errors
+            self._last_call = time.time() - self._min_interval + 10
             return None

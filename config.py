@@ -1,6 +1,9 @@
 """AI-MON frontend configuration loaded from environment variables."""
 
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- Backend Connection ---
 BACKEND_WS_URL = os.getenv("BACKEND_WS_URL", "ws://localhost:8080")
@@ -47,10 +50,10 @@ CONTENT_HEIGHT = CONTENT_Y_END - CONTENT_Y_START
 # Character sprite position (centered in content area)
 CHAR_SPRITE_SIZE = (156, 156)
 CHAR_SPRITE_X = (LCD_WIDTH - 156) // 2
-CHAR_SPRITE_Y = CONTENT_Y_START + 10
+CHAR_SPRITE_Y = CONTENT_Y_START + 30
 
 # Speech bubble (below character)
-BUBBLE_Y = CHAR_SPRITE_Y + 160
+BUBBLE_Y = CHAR_SPRITE_Y + 150
 BUBBLE_HEIGHT = 80
 BUBBLE_WIDTH = LCD_WIDTH - 20
 BUBBLE_X = 10
@@ -115,3 +118,23 @@ LED_CAMERA = (200, 100, 255)  # purple — camera capture in progress
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 VISION_ENABLED = bool(GEMINI_API_KEY) and CAMERA_ENABLED
+
+# --- SFX & Audio ---
+SFX_DIR = os.path.join(os.path.dirname(__file__), "audio", "sfx")
+OFFLINE_AUDIO_DIR = os.path.join(os.path.dirname(__file__), "audio", "offline")
+
+# Pygame mixer channel assignments
+SFX_CHANNEL_TTS = 0       # reserved for TTS (existing)
+SFX_CHANNEL_PRIMARY = 1   # eat, level up, evolution
+SFX_CHANNEL_NOTIFY = 2    # badge, quest
+SFX_CHANNEL_AMBIENT = 3   # warning, ambient
+
+# Animation durations (frames at 30 FPS)
+EVOLUTION_ANIM_FRAMES = 90    # 3 seconds
+BADGE_POPUP_FRAMES = 90       # 3 seconds
+WARNING_ANIM_FRAMES = 60      # 2 seconds
+REGRESSION_ANIM_FRAMES = 120  # 4 seconds
+
+# SFX ducking (volume scale 0.0-1.0)
+SFX_DUCK_VOLUME = 0.3
+SFX_NORMAL_VOLUME = 1.0

@@ -7,10 +7,15 @@ compositor-based rendering.
 
 import dataclasses
 import enum
+import glob as glob_mod
 import importlib
 import logging
+import os
+import random
 import time
 import threading
+
+import pygame
 
 import config
 
@@ -28,6 +33,14 @@ CameraCaptureService = _cam_mod.CameraCaptureService
 _vision_mod = importlib.import_module("hardware.vision-analysis-service")
 VisionAnalysisService = _vision_mod.VisionAnalysisService
 
+# Import SFX, badge popup, and pet event handler
+_sfx_mod = importlib.import_module("audio.sfx-manager")
+SfxManager = _sfx_mod.SfxManager
+_badge_mod = importlib.import_module("display.badge-popup-renderer")
+BadgePopupRenderer = _badge_mod.BadgePopupRenderer
+_pet_handler_mod = importlib.import_module("state.pet-event-handler")
+PetEventHandler = _pet_handler_mod.PetEventHandler
+
 
 class State(enum.Enum):
     IDLE = "idle"
@@ -36,6 +49,7 @@ class State(enum.Enum):
     ANSWER = "answer"
     EMOTION = "emotion"
     OFFLINE = "offline"
+    EVOLUTION = "evolution"  # black screen flash → hold new form until button
 
 
 # Map conversation state -> pet animation name
@@ -60,7 +74,8 @@ class StateMachine:
         self._ws = ws
         self._logger = logger
 
-        self._state = State.OFFLINE
+        self._state = State.IDLE
+        self._offline = False  # True when WS disconnected; pet renders normally
         self._tick = 0
         self._emotion_tick = 0
         self._current_emotion = "happy"
@@ -86,6 +101,23 @@ class StateMachine:
         if config.VISION_ENABLED:
             self._vision = VisionAnalysisService()
 
+        # Evolution sequence state
+        self._evolution_old_stage = "egg"
+        self._evolution_new_stage = "baby"
+        self._evolution_tick = 0
+        self._evolution_holding = False   # True = flash done, holding new form
+
+        # SFX, badge popup, and pet event handler
+        self._sfx = SfxManager()
+        self._badge_popup = BadgePopupRenderer()
+        self._pet_handler = PetEventHandler(
+            self._pet_state, self._pet_lock, self._display,
+            self._sfx, self._badge_popup,
+        )
+
+        # Set default background
+        self._display.set_background("marshmallow-meadow.png")
+
         self._register_callbacks()
 
     def _register_callbacks(self):
@@ -103,11 +135,22 @@ class StateMachine:
         self._ws.on_disconnect = self._on_disconnect
         self._ws.on_reconnect = self._on_reconnect
         self._ws.on_pet_feed_result = self._on_pet_feed_result
+        # Pet event handler callbacks
+        self._ws.on_pet_status = self._pet_handler.on_pet_status
+        self._ws.on_camera_result = self._pet_handler.on_camera_result
+        self._ws.on_badge_earned = self._pet_handler.on_badge_earned
+        self._ws.on_pet_evolution = self._pet_handler.on_pet_evolution
+        self._ws.on_pet_transform = self._pet_handler.on_pet_transform
+        self._ws.on_pet_transform_end = self._pet_handler.on_pet_transform_end
+        self._ws.on_pet_warning = self._pet_handler.on_pet_warning
+        self._ws.on_pet_regression = self._pet_handler.on_pet_regression
+        self._ws.on_quest_start = self._pet_handler.on_quest_start
 
     _LED_MAP = {
         State.IDLE: config.LED_IDLE, State.LISTENING: config.LED_LISTENING,
         State.ASR: config.LED_ASR, State.ANSWER: config.LED_ANSWER,
         State.EMOTION: config.LED_EMOTION_HAPPY, State.OFFLINE: config.LED_OFFLINE,
+        State.EVOLUTION: (160, 0, 220),  # purple during evolution
     }
 
     def _set_state(self, new_state):
@@ -134,6 +177,16 @@ class StateMachine:
             self._capture.stop()
 
     def _on_button_press(self):
+        if self._state == State.EVOLUTION:
+            if self._evolution_holding:
+                # Exit evolution: restore background and go idle
+                self._pet_handler.end_evolution()
+                self._display.clear_black_background()
+                self._display.set_background("marshmallow-meadow.png")
+                self._set_state(State.IDLE)
+            # During flash phase, ignore button (don't cut the animation short)
+            return
+
         if self._state == State.ANSWER:
             self._interrupt()
             return
@@ -168,7 +221,10 @@ class StateMachine:
             self._press_pending = False
             self._press_timer = None
         if self._state == State.IDLE:
-            self._start_listening()
+            if self._offline:
+                self._play_offline_clip()
+            else:
+                self._start_listening()
 
     def _trigger_camera(self):
         """Capture photo and analyze directly via Gemini on Pi."""
@@ -184,28 +240,29 @@ class StateMachine:
         log.info("Camera capture triggered (double-press)")
 
         def _capture_and_analyze():
-            jpeg_bytes = self._camera.capture_bytes()
-            if not jpeg_bytes:
-                log.warning("Camera capture returned None")
+            try:
+                jpeg_bytes = self._camera.capture_bytes()
+                if not jpeg_bytes:
+                    log.warning("Camera capture returned None")
+                    return
+
+                result = self._vision.analyze(jpeg_bytes)
+
+                if result is None:
+                    self._last_bubble_text = "Mình không thấy rõ, thử lại nhé!"
+                    return
+
+                if result.get("is_food") and result.get("food_name"):
+                    food = result["food_name"]
+                    log.info("Food detected: %s", food)
+                    self._last_bubble_text = food + " ngon quá! Cho mình ăn nhé?"
+                    self._ws.send_feed_confirm(food)
+                else:
+                    desc = result.get("description", "")
+                    log.info("Non-food: %s", desc)
+                    self._last_bubble_text = desc
+            finally:
                 self._hat.set_rgb_tuple(config.LED_IDLE)
-                return
-
-            result = self._vision.analyze(jpeg_bytes)
-            self._hat.set_rgb_tuple(config.LED_IDLE)
-
-            if result is None:
-                self._last_bubble_text = "Mình không thấy rõ, thử lại nhé!"
-                return
-
-            if result.get("is_food") and result.get("food_name"):
-                food = result["food_name"]
-                log.info("Food detected: %s", food)
-                self._last_bubble_text = food + " ngon quá! Cho mình ăn nhé?"
-                self._ws.send_feed_confirm(food)
-            else:
-                desc = result.get("description", "")
-                log.info("Non-food: %s", desc)
-                self._last_bubble_text = desc
 
         threading.Thread(target=_capture_and_analyze, daemon=True).start()
 
@@ -237,6 +294,7 @@ class StateMachine:
 
     def _on_hello_ack(self, session_id):
         log.info("Session established: %s", session_id)
+        self._offline = False
         self._set_state(State.IDLE)
 
     def _on_asr_result(self, text, confidence):
@@ -305,8 +363,24 @@ class StateMachine:
     def _on_disconnect(self):
         self._ensure_mic_off()
         self._playback.stop()
-        self._set_state(State.OFFLINE)
+        self._offline = True
+        self._set_state(State.IDLE)
+        self._play_offline_clip()
         threading.Thread(target=self._reconnect_loop, daemon=True).start()
+
+    def _play_offline_clip(self):
+        """Play random pre-recorded offline audio clip if available."""
+        if not pygame.mixer.get_init():
+            log.debug("Mixer not initialized, skipping offline clip")
+            return
+        clips = glob_mod.glob(os.path.join(config.OFFLINE_AUDIO_DIR, "*.ogg"))
+        if clips:
+            clip = random.choice(clips)
+            try:
+                sound = pygame.mixer.Sound(clip)
+                pygame.mixer.Channel(config.SFX_CHANNEL_PRIMARY).play(sound)
+            except pygame.error as e:
+                log.warning("Failed to play offline clip: %s", e)
 
     def _on_reconnect(self):
         self._ws.send_hello()
@@ -320,12 +394,22 @@ class StateMachine:
         self._tick += 1
         state = self._state
 
-        if state == State.OFFLINE:
-            self._display.render_offline(self._tick)
+        # Check for pending evolution event (can arrive in any state)
+        if self._pet_handler.has_evolution_pending:
+            self._enter_evolution()
+            state = self._state
+
+        if state == State.EVOLUTION:
+            self._tick_evolution()
             return
 
         if state == State.EMOTION:
             self._emotion_tick += 1
+
+        # Tick warning countdown
+        if self._pet_handler.tick_warning():
+            with self._pet_lock:
+                self._pet_state.animation = _STATE_ANIMATION_MAP.get(state, "idle")
 
         # Build text for speech bubble — persist through ANSWER, EMOTION, and IDLE
         # until next LISTENING clears it
@@ -334,7 +418,13 @@ class StateMachine:
                 self._last_bubble_text = "❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️..."
             else:
                 self._last_bubble_text = "".join(self._tokens)
-        text = self._last_bubble_text if state in (State.ANSWER, State.EMOTION, State.IDLE) else None
+
+        # Quest text overrides bubble when active
+        quest = self._pet_handler.quest_text
+        if quest and state == State.IDLE:
+            text = quest
+        else:
+            text = self._last_bubble_text if state in (State.ANSWER, State.EMOTION, State.IDLE) else None
 
         # Snapshot pet state under lock to avoid torn reads from WS thread
         with self._pet_lock:
@@ -343,11 +433,81 @@ class StateMachine:
         # Use tick or emotion_tick depending on state
         render_tick = self._emotion_tick if state == State.EMOTION else self._tick
 
-        done = self._display.render(render_tick, pet_snapshot, text)
+        done = self._display.render(render_tick, pet_snapshot, text, self._badge_popup)
+
+        # SFX ducking: reduce SFX volume during TTS playback
+        if self._playback.is_playing():
+            self._sfx.duck_for_tts()
+        else:
+            self._sfx.unduck()
 
         # Return to IDLE when emotion animation completes or after 3s timeout
         if state == State.EMOTION and (done or self._emotion_tick > 90):
             self._set_state(State.IDLE)
+
+        # Clear quest text when child starts listening (answered the quest)
+        if state == State.LISTENING and quest:
+            self._pet_handler.clear_quest()
+
+    def _enter_evolution(self):
+        """Consume pending evolution event and enter EVOLUTION state."""
+        old_stage, new_stage = self._pet_handler.evolution_data
+        self._pet_handler.clear_evolution()
+        self._evolution_old_stage = old_stage.lower()
+        self._evolution_new_stage = new_stage.lower()
+        self._evolution_tick = 0
+        self._evolution_holding = False
+        # Preload new stage sprites so evolution animation is ready
+        self._display.preload_stage(self._evolution_new_stage)
+        # Force old stage so backend's pet_status update doesn't reveal new form early
+        with self._pet_lock:
+            self._pet_state.stage = self._evolution_old_stage
+            self._pet_state.animation = "idle"
+        self._display.set_black_background()
+        self._set_state(State.EVOLUTION)
+        log.info("Evolution started: %s -> %s", self._evolution_old_stage, self._evolution_new_stage)
+
+    def _tick_evolution(self):
+        """Drive the evolution animation + hold sequence each frame.
+
+        Phase 1 (flash): White flash pulses over old form on black background.
+        Phase 2 (evolution anim): Play new stage's "evolution" animation on black.
+        Phase 3 (hold): Show new form idle on black until button press.
+        """
+        self._evolution_tick += 1
+
+        if not self._evolution_holding:
+            # Phase 1: Flash over old form (first 90 frames / 3s)
+            if self._evolution_tick <= 90:
+                with self._pet_lock:
+                    self._pet_state.stage = self._evolution_old_stage
+                    self._pet_state.animation = "idle"
+                    pet_snapshot = dataclasses.replace(self._pet_state)
+                self._display.render_evolution(self._evolution_tick, pet_snapshot)
+            else:
+                # Phase 2: Play new stage's "evolution" animation on black
+                anim_tick = self._evolution_tick - 90
+                with self._pet_lock:
+                    self._pet_state.stage = self._evolution_new_stage
+                    self._pet_state.animation = "evolution"
+                    pet_snapshot = dataclasses.replace(self._pet_state)
+                done = self._display.render(anim_tick, pet_snapshot, None, None)
+                if done:
+                    # Evolution animation finished, enter hold phase
+                    with self._pet_lock:
+                        self._pet_state.animation = "idle"
+                    self._display.on_stats_changed()
+                    self._evolution_holding = True
+                    log.info("Evolution anim done, holding on %s — press button to continue",
+                             self._evolution_new_stage)
+        else:
+            # Phase 3: Hold new form with rotation animation on black until button press
+            with self._pet_lock:
+                self._pet_state.stage = self._evolution_new_stage
+                self._pet_state.animation = "idle"  # idle uses rotation rocking sequence
+                pet_snapshot = dataclasses.replace(self._pet_state)
+
+            self._display.render(self._evolution_tick, pet_snapshot, None, None)
 
     def update_pet_state(self, **kwargs):
         """Update pet state from backend pet_status messages (thread-safe).
@@ -374,5 +534,5 @@ class StateMachine:
         if self._ws.connect():
             self._ws.send_hello()
         else:
-            self._set_state(State.OFFLINE)
+            self._offline = True
             threading.Thread(target=self._reconnect_loop, daemon=True).start()

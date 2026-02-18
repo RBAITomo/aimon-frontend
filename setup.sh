@@ -13,8 +13,9 @@ sudo apt-get install -y \
     portaudio19-dev \
     libopus-dev libopus0 \
     libasound2-dev \
-    python3-rpi.gpio \
-    i2c-tools
+    python3-rpi-lgpio \
+    i2c-tools \
+    rpicam-apps
 
 # Create virtual environment
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -53,14 +54,28 @@ if [ -f "$CONFIG_FILE" ] && ! sudo grep -q "^dtparam=i2c_arm=on" "$CONFIG_FILE" 
     REBOOT_NEEDED=true
 fi
 
+# Enable camera if not already enabled (OV5647 via CSI)
+# Note: camera_auto_detect=1 is usually present on Bookworm by default.
+# rpicam-apps (Bookworm) replaces legacy libcamera-apps; use rpicam-still/rpicam-hello.
+if [ -f "$CONFIG_FILE" ] && ! sudo grep -q "^camera_auto_detect=1" "$CONFIG_FILE" 2>/dev/null; then
+    echo "Enabling camera auto-detect..."
+    sudo bash -c "echo 'camera_auto_detect=1' >> $CONFIG_FILE"
+    echo "⚠️  Camera enabled. Reboot required for changes to take effect."
+    REBOOT_NEEDED=true
+fi
+
 echo ""
 echo "✅ Setup complete!"
 echo ""
 if [ "${REBOOT_NEEDED:-false}" = "true" ]; then
-    echo "⚠️  REBOOT REQUIRED: SPI/I2C interfaces enabled"
+    echo "⚠️  REBOOT REQUIRED: interfaces enabled (SPI/I2C/Camera)"
     echo "   Run: sudo reboot"
     echo ""
 fi
+echo "Camera test (after reboot):"
+echo "   rpicam-hello --list-cameras        # verify OV5647 detected"
+echo "   rpicam-still --nopreview -o test.jpg  # capture a test photo"
+echo ""
 echo "Next steps:"
 echo "1. Configure backend URL: export BACKEND_WS_URL='ws://192.168.1.52:8080'"
 echo "2. Set robot ID: export ROBOT_ID='aimon-001'"

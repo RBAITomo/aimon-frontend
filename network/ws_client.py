@@ -37,8 +37,16 @@ class WSClient:
         self.on_interrupt_ack = None
         self.on_disconnect = None
         self.on_reconnect = None
-        self.on_camera_result = None
         self.on_pet_feed_result = None
+        self.on_pet_status = None
+        self.on_camera_result = None
+        self.on_badge_earned = None
+        self.on_pet_evolution = None
+        self.on_pet_transform = None
+        self.on_pet_transform_end = None
+        self.on_pet_warning = None
+        self.on_pet_regression = None
+        self.on_quest_start = None
 
     def connect(self):
         url = f"{config.BACKEND_WS_URL}/ws/audio/{config.ROBOT_ID}"
@@ -210,15 +218,6 @@ class WSClient:
             if self.on_interrupt_ack:
                 self.on_interrupt_ack()
 
-        elif msg_type == "camera_result":
-            if self.on_camera_result:
-                self.on_camera_result(
-                    msg.get("is_food", False),
-                    msg.get("food_name"),
-                    msg.get("description", ""),
-                    msg.get("prompt"),
-                )
-
         elif msg_type == "pet_feed_result":
             if self.on_pet_feed_result:
                 self.on_pet_feed_result(
@@ -226,6 +225,42 @@ class WSClient:
                     msg.get("food_name"),
                     msg.get("hunger_reduction", 0),
                 )
+
+        elif msg_type == "pet_status":
+            if self.on_pet_status:
+                self.on_pet_status(msg)
+
+        elif msg_type == "camera_result":
+            if self.on_camera_result:
+                self.on_camera_result(msg)
+
+        elif msg_type == "badge_earned":
+            if self.on_badge_earned:
+                self.on_badge_earned(msg)
+
+        elif msg_type == "pet_evolution":
+            if self.on_pet_evolution:
+                self.on_pet_evolution(msg)
+
+        elif msg_type == "pet_transform":
+            if self.on_pet_transform:
+                self.on_pet_transform(msg)
+
+        elif msg_type == "pet_transform_end":
+            if self.on_pet_transform_end:
+                self.on_pet_transform_end(msg)
+
+        elif msg_type == "pet_warning":
+            if self.on_pet_warning:
+                self.on_pet_warning(msg)
+
+        elif msg_type == "pet_regression":
+            if self.on_pet_regression:
+                self.on_pet_regression(msg)
+
+        elif msg_type == "quest_start":
+            if self.on_quest_start:
+                self.on_quest_start(msg)
 
         elif msg_type == "pong":
             log.debug("Pong received")

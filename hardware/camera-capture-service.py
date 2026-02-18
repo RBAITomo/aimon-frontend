@@ -4,7 +4,6 @@ Captures JPEG to memory (no disk I/O), returns base64 string.
 Graceful fallback on non-Pi platforms (returns None).
 """
 
-import base64
 import io
 import logging
 import time
@@ -46,32 +45,6 @@ class CameraCaptureService:
     def rate_limited(self):
         """Whether capture is currently rate-limited."""
         return time.time() - self._last_capture < self._min_interval
-
-    def capture_base64(self):
-        """Capture photo, return (base64_string, 'jpeg') or (None, None).
-
-        Returns None if not initialized, rate-limited, or capture fails.
-        """
-        if not self._initialized:
-            return None, None
-
-        now = time.time()
-        if now - self._last_capture < self._min_interval:
-            remaining = int(self._min_interval - (now - self._last_capture))
-            log.info("Camera rate-limited, wait %ds", remaining)
-            return None, None
-
-        try:
-            stream = io.BytesIO()
-            self._camera.capture_file(stream, format="jpeg")
-            stream.seek(0)
-            b64 = base64.b64encode(stream.read()).decode("utf-8")
-            self._last_capture = now
-            log.info("Photo captured (%d bytes base64)", len(b64))
-            return b64, "jpeg"
-        except Exception as e:
-            log.error("Camera capture failed: %s", e)
-            return None, None
 
     def capture_bytes(self):
         """Capture photo, return raw JPEG bytes or None."""

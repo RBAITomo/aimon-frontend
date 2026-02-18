@@ -51,6 +51,23 @@ class LayerCompositor:
         # Cache last stat values to detect changes
         self._last_stats = None
 
+        # Evolution mode: solid black background, stat bars hidden
+        self._evolution_mode = False
+
+    def set_black_background(self):
+        """Enter evolution mode: solid black canvas, stat bars suppressed."""
+        self._evolution_mode = True
+        self._base_dirty = True
+
+    def clear_black_background(self):
+        """Exit evolution mode: restore normal background + stat bars."""
+        self._evolution_mode = False
+        self._base_dirty = True
+
+    def preload_stage(self, stage):
+        """Preload sprites for a stage without switching current stage."""
+        self._sprite_mgr.load_stage(stage)
+
     def load_stage(self, stage):
         """Load sprites for a new evolution stage."""
         if stage == self._current_stage:
@@ -123,6 +140,12 @@ class LayerCompositor:
 
     def _rebuild_base(self, pet_state):
         """Rebuild cached base surface: background + stat bars + XP bar."""
+        if self._evolution_mode:
+            # Evolution mode: solid black, no stat bars
+            self._base_surface.fill((0, 0, 0))
+            self._base_dirty = False
+            return
+
         self._base_surface.fill(_COL_BG)
 
         # Background image in content area
