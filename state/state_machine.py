@@ -274,6 +274,7 @@ class StateMachine:
         self._set_state(State.LISTENING)
         self._tokens = []
         self._last_bubble_text = None
+        self._pet_handler.clear_quest()  # clear quest bubble when child starts speaking
         self._turn_start_time = time.time()
         self._ws.send_audio_start()
         self._capture.start()
