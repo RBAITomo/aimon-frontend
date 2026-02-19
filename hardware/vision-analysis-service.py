@@ -6,20 +6,24 @@ for food detection and scene description.
 
 import json
 import logging
+import os
+import random
+import re
 import time
 
 import config
 
 log = logging.getLogger(__name__)
 
-VISION_PROMPT = (
+VISION_PROMPT_TEMPLATE = (
     "Analyze this image taken by a child's AI companion toy.\n"
     "Rules:\n"
-    '1. If food, respond JSON: {"is_food": true, "food_name": "<Vietnamese name>", "description": "<brief>"}\n'
-    '2. If not food, respond JSON: {"is_food": false, "food_name": null, "description": "<Vietnamese, child-friendly>"}\n'
+    '1. If food, respond JSON: {{"is_food": true, "food_name": "<Vietnamese name>", "sprite_key": "<key>", "description": "<brief>"}}\n'
+    '2. If not food, respond JSON: {{"is_food": false, "food_name": null, "sprite_key": null, "description": "<Vietnamese, child-friendly>"}}\n'
     "3. Keep descriptions under 50 words.\n"
     "4. Be child-appropriate and positive.\n"
-    "5. Respond ONLY with JSON, no markdown fences."
+    "5. Respond ONLY with JSON, no markdown fences.\n"
+    "6. For sprite_key, pick the closest match from this list: [{sprite_keys}]. Use 'default' if none match."
 )
 
 
@@ -31,6 +35,7 @@ class VisionAnalysisService:
         self._available = False
         self._last_call = 0.0
         self._min_interval = config.CAMERA_RATE_LIMIT_S
+        self._sprite_keys = self._scan_sprite_keys()
         self._initialize()
 
     def _initialize(self):
@@ -45,6 +50,33 @@ class VisionAnalysisService:
             log.info("Vision analysis service initialized (model=%s)", config.GEMINI_MODEL)
         except Exception as e:
             log.warning("Vision init failed: %s", e)
+
+    def _scan_sprite_keys(self):
+        """Scan assets/food/ directory for available sprite filenames (without .png)."""
+        food_dir = os.path.join(config.ASSET_DIR, "food")
+        keys = []
+        if not os.path.isdir(food_dir):
+            log.warning("Food sprite directory not found: %s", food_dir)
+            return keys
+        for f in os.listdir(food_dir):
+            if f.lower().endswith(".png"):
+                keys.append(os.path.splitext(f)[0])
+        log.info("Loaded %d food sprite keys", len(keys))
+        return keys
+
+    def _validate_sprite_key(self, key):
+        """Validate sprite_key: must be alphanumeric/underscore/space and exist in sprite list."""
+        if not key or not isinstance(key, str):
+            return random.choice(["default", "default2"])
+        sanitized = re.sub(r"[^a-zA-Z0-9_ ]", "", key)
+        if sanitized in self._sprite_keys:
+            return sanitized
+        # Try case-insensitive match
+        lower = sanitized.lower()
+        for k in self._sprite_keys:
+            if k.lower() == lower:
+                return k
+        return random.choice(["default", "default2"])
 
     @property
     def available(self):
@@ -72,13 +104,17 @@ class VisionAnalysisService:
         try:
             from google.genai import types
 
+            prompt = VISION_PROMPT_TEMPLATE.format(
+                sprite_keys=", ".join(self._sprite_keys[:100])
+            )
+
             response = self._client.models.generate_content(
                 model=config.GEMINI_MODEL,
                 contents=[
                     types.Content(
                         parts=[
                             types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
-                            types.Part.from_text(text=VISION_PROMPT),
+                            types.Part.from_text(text=prompt),
                         ]
                     )
                 ],
@@ -93,7 +129,11 @@ class VisionAnalysisService:
                     text = text[first_nl + 1 : last_fence].strip()
 
             result = json.loads(text)
-            log.info("Vision result: is_food=%s, food=%s", result.get("is_food"), result.get("food_name"))
+            # Validate and set sprite_key
+            if result.get("is_food"):
+                result["sprite_key"] = self._validate_sprite_key(result.get("sprite_key"))
+            log.info("Vision result: is_food=%s, food=%s, sprite=%s",
+                     result.get("is_food"), result.get("food_name"), result.get("sprite_key"))
             return result
 
         except Exception as e:

@@ -41,6 +41,9 @@ BadgePopupRenderer = _badge_mod.BadgePopupRenderer
 _pet_handler_mod = importlib.import_module("state.pet-event-handler")
 PetEventHandler = _pet_handler_mod.PetEventHandler
 
+_food_mgr_mod = importlib.import_module("state.food-sprite-manager")
+FoodSpriteManager = _food_mgr_mod.FoodSpriteManager
+
 
 class State(enum.Enum):
     IDLE = "idle"
@@ -107,12 +110,13 @@ class StateMachine:
         self._evolution_tick = 0
         self._evolution_holding = False   # True = flash done, holding new form
 
-        # SFX, badge popup, and pet event handler
+        # SFX, badge popup, food sprite manager, and pet event handler
         self._sfx = SfxManager()
         self._badge_popup = BadgePopupRenderer()
+        self._food_mgr = FoodSpriteManager()
         self._pet_handler = PetEventHandler(
             self._pet_state, self._pet_lock, self._display,
-            self._sfx, self._badge_popup,
+            self._sfx, self._badge_popup, self._food_mgr, self._ws,
         )
 
         # Set default background
@@ -254,9 +258,22 @@ class StateMachine:
 
                 if result.get("is_food") and result.get("food_name"):
                     food = result["food_name"]
-                    log.info("Food detected: %s", food)
-                    self._last_bubble_text = food + " ngon quá! Cho mình ăn nhé?"
-                    self._ws.send_feed_confirm(food)
+                    sprite_key = result.get("sprite_key", "default")
+                    log.info("Food detected: %s (sprite=%s)", food, sprite_key)
+
+                    with self._pet_lock:
+                        hunger = self._pet_state.hunger
+
+                    if hunger > 0:
+                        # Pet is hungry — eat immediately
+                        self._food_mgr.add(sprite_key, food, eat_immediately=True)
+                        self._last_bubble_text = food + " ngon quá! Cho mình ăn nhé?"
+                        self._ws.send_feed_confirm(food, sprite_key)
+                        self._sfx.play("eat")
+                    else:
+                        # Pet is full — store food on screen
+                        self._food_mgr.add(sprite_key, food, eat_immediately=False)
+                        self._last_bubble_text = "Mình no rồi! Để dành ăn sau nhé~"
                 else:
                     desc = result.get("description", "")
                     log.info("Non-food: %s", desc)
@@ -449,7 +466,10 @@ class StateMachine:
         # Use tick or emotion_tick depending on state
         render_tick = self._emotion_tick if state == State.EMOTION else self._tick
 
-        done = self._display.render(render_tick, pet_snapshot, text, self._badge_popup)
+        # Advance food sprite tweens
+        self._food_mgr.tick()
+
+        done = self._display.render(render_tick, pet_snapshot, text, self._badge_popup, self._food_mgr)
 
         # SFX ducking: reduce SFX volume during TTS playback
         if self._playback.is_playing():
@@ -478,6 +498,7 @@ class StateMachine:
         with self._pet_lock:
             self._pet_state.stage = self._evolution_old_stage
             self._pet_state.animation = "idle"
+        self._food_mgr.clear()  # clear food sprites during evolution
         self._display.set_black_background()
         self._set_state(State.EVOLUTION)
         log.info("Evolution started: %s -> %s", self._evolution_old_stage, self._evolution_new_stage)

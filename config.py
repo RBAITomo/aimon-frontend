@@ -129,6 +129,19 @@ SFX_CHANNEL_PRIMARY = 1   # eat, level up, evolution
 SFX_CHANNEL_NOTIFY = 2    # badge, quest
 SFX_CHANNEL_AMBIENT = 3   # warning, ambient
 
+# Food sprite overlay
+FOOD_SPRITE_SIZE = 40
+FOOD_SPRITE_MAX = 3
+FOOD_TWEEN_FRAMES = 20
+# 3 fixed slot positions near pet (below character, spaced horizontally)
+FOOD_SLOT_POSITIONS = [
+    (CHAR_SPRITE_X + 10, CHAR_SPRITE_Y + CHAR_SPRITE_SIZE[1] - 10),
+    (CHAR_SPRITE_X + CHAR_SPRITE_SIZE[0] // 2 - FOOD_SPRITE_SIZE // 2, CHAR_SPRITE_Y + CHAR_SPRITE_SIZE[1]),
+    (CHAR_SPRITE_X + CHAR_SPRITE_SIZE[0] - FOOD_SPRITE_SIZE - 10, CHAR_SPRITE_Y + CHAR_SPRITE_SIZE[1] - 10),
+]
+# Pet center target for tween animation
+FOOD_PET_CENTER = (CHAR_SPRITE_X + CHAR_SPRITE_SIZE[0] // 2, CHAR_SPRITE_Y + CHAR_SPRITE_SIZE[1] // 2)
+
 # Animation durations (frames at 30 FPS)
 EVOLUTION_ANIM_FRAMES = 90    # 3 seconds
 BADGE_POPUP_FRAMES = 90       # 3 seconds

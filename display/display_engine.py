@@ -43,7 +43,7 @@ class DisplayEngine:
 
         log.info("DisplayEngine initialized (%dx%d)", config.LCD_WIDTH, config.LCD_HEIGHT)
 
-    def render(self, tick, pet_state, text=None, badge_popup=None):
+    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None):
         """Main render call — delegates to compositor.
 
         Args:
@@ -51,6 +51,7 @@ class DisplayEngine:
             pet_state: PetState dataclass with all rendering data.
             text: Optional speech bubble text.
             badge_popup: Optional BadgePopupRenderer to overlay on top.
+            food_mgr: Optional FoodSpriteManager to render food sprites.
 
         Returns:
             bool: True if current animation finished.
@@ -58,6 +59,8 @@ class DisplayEngine:
         done = self._compositor.render_frame(
             self._surface, tick, pet_state, text
         )
+        if food_mgr:
+            food_mgr.render(self._surface)
         if badge_popup:
             badge_popup.render(self._surface, tick)
         self._blit_to_lcd()

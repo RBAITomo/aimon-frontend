@@ -138,9 +138,9 @@ class WSClient:
     def send_interrupt(self):
         self._send_json({"type": "interrupt"})
 
-    def send_feed_confirm(self, food_name="unknown"):
+    def send_feed_confirm(self, food_name="unknown", sprite_key="default"):
         """Confirm feeding after food detection (food analyzed on Pi)."""
-        self._send_json({"type": "pet_feed_confirm", "food_name": food_name})
+        self._send_json({"type": "pet_feed_confirm", "food_name": food_name, "sprite_key": sprite_key})
 
     def send_ping(self):
         self._send_json({"type": "ping"})

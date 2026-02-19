@@ -16,12 +16,14 @@ log = logging.getLogger(__name__)
 class PetEventHandler:
     """Handles pet WebSocket messages, updates PetState, triggers UI/SFX."""
 
-    def __init__(self, pet_state, pet_lock, display, sfx, badge_popup):
+    def __init__(self, pet_state, pet_lock, display, sfx, badge_popup, food_mgr=None, ws=None):
         self._pet_state = pet_state
         self._pet_lock = pet_lock
         self._display = display
         self._sfx = sfx
         self._badge_popup = badge_popup
+        self._food_mgr = food_mgr
+        self._ws = ws
 
         # Animation state flags (read by StateMachine.tick)
         self._evolution_pending = None   # (old_stage, new_stage) or None
@@ -52,6 +54,7 @@ class PetEventHandler:
                 self._pet_state.stage = raw_stage.lower() if isinstance(raw_stage, str) else raw_stage
                 self._pet_state.variant = data.get("variant", self._pet_state.variant)
             self._pet_state.mood = data.get("mood", self._pet_state.mood)
+            hunger = self._pet_state.hunger
 
         # Parse quest from pet_status (reconnect/refresh scenario)
         quest = data.get("quest")
@@ -65,6 +68,10 @@ class PetEventHandler:
 
         self._display.on_stats_changed()
         log.debug("Pet status updated: lvl=%d stage=%s", self._pet_state.level, self._pet_state.stage)
+
+        # Auto-eat stored food when hunger increases
+        if self._food_mgr and hunger > 0:
+            self._food_mgr.check_auto_eat(hunger, self._auto_eat_callback)
 
     def on_pet_feed_result(self, data):
         """Handle successful feeding — play eat SFX."""
@@ -175,6 +182,15 @@ class PetEventHandler:
             if self._warning_frames <= 0:
                 return True
         return False
+
+    def _auto_eat_callback(self, food_name, sprite_key):
+        """Called when auto-eat triggers on stored food."""
+        self._sfx.play("eat")
+        with self._pet_lock:
+            self._pet_state.animation = "eating"
+        if self._ws:
+            self._ws.send_feed_confirm(food_name, sprite_key)
+        log.info("Auto-eat: %s (sprite=%s)", food_name, sprite_key)
 
     def clear_quest(self):
         self._quest_text = None
