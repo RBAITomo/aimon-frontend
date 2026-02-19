@@ -7,7 +7,7 @@ load_dotenv()
 
 # --- Backend Connection ---
 BACKEND_WS_URL = os.getenv("BACKEND_WS_URL", "ws://localhost:8080")
-ROBOT_ID = os.getenv("ROBOT_ID", "robot001")
+ROBOT_ID = os.getenv("ROBOT_ID", "1")  # numeric userId or pet name from pet_profiles
 WS_RECONNECT_INTERVAL_S = 2
 WS_RECONNECT_MAX_ATTEMPTS = 5
 WS_PING_INTERVAL_S = 15
