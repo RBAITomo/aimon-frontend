@@ -337,8 +337,23 @@ class StateMachine:
             emotion=self._current_emotion,
             duration_ms=duration_ms,
         )
+        # Defer EMOTION transition until playback queue drains
+        # (turn_end can arrive before all binary PCM chunks are played)
+        threading.Thread(
+            target=self._finish_turn_after_playback, daemon=True
+        ).start()
+
+    def _finish_turn_after_playback(self):
+        """Wait for playback queue to drain, then transition to EMOTION."""
+        timeout = time.time() + 30  # safety: 30s max wait
+        while self._playing_active() and time.time() < timeout:
+            time.sleep(0.05)
         self._emotion_tick = 0
         self._set_state(State.EMOTION)
+
+    def _playing_active(self):
+        """Check if playback is still active (thread running and queue non-empty)."""
+        return self._playback._playing and not self._playback._queue.empty()
 
     def _on_error(self, code, message):
         log.error("Backend error [%s]: %s", code, message)
