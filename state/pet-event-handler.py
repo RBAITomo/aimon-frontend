@@ -38,11 +38,11 @@ class PetEventHandler:
         Skips stage/variant updates while evolution is pending or in progress
         to prevent the pet_status race from overriding the animation sequence.
         """
+        log.info("on_pet_status: stage=%s level=%s", data.get("stage"), data.get("level"))
         with self._pet_lock:
-            stats = data.get("stats", {})
-            self._pet_state.hunger = stats.get("hunger", self._pet_state.hunger)
-            self._pet_state.energy = stats.get("energy", self._pet_state.energy)
-            self._pet_state.happiness = stats.get("happiness", self._pet_state.happiness)
+            self._pet_state.hunger = data.get("hunger", self._pet_state.hunger)
+            self._pet_state.energy = data.get("energy", self._pet_state.energy)
+            self._pet_state.happiness = data.get("happiness", self._pet_state.happiness)
             self._pet_state.level = data.get("level", self._pet_state.level)
             self._pet_state.xp = data.get("xp", self._pet_state.xp)
             self._pet_state.xp_for_next = data.get("xp_for_next", self._pet_state.xp_for_next)
