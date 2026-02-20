@@ -142,7 +142,7 @@ class VisionAnalysisService:
                     )
                 ],
                 config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_budget=1024),
+                    thinking_config=types.ThinkingConfig(thinking_budget=128),
                 ),
             )
 
