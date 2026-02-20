@@ -86,7 +86,7 @@ MOVABLE_STAGES = {"child", "adult"}
 
 # Movement zone (lower half of content area, character wanders within)
 MOVE_ZONE_Y_MIN = CONTENT_Y_START + 10
-MOVE_ZONE_Y_MAX = CONTENT_Y_END - CHAR_SPRITE_SIZE[1] - 10
+MOVE_ZONE_Y_MAX = LCD_HEIGHT - CHAR_SPRITE_SIZE[1]  # allow overlap with speech bubble/XP bar
 MOVE_ZONE_X_MIN = 10
 MOVE_ZONE_X_MAX = LCD_WIDTH - CHAR_SPRITE_SIZE[0] - 10
 MOVE_SPEED = 1.0  # pixels per frame (~30px/s at 30fps)
