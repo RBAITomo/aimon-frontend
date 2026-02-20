@@ -99,10 +99,10 @@ class VisionAnalysisService:
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=quality)
             compressed = buf.getvalue()
-            log.debug("Image compressed: %d -> %d bytes", len(jpeg_bytes), len(compressed))
+            log.info("Image compressed: %d -> %d bytes", len(jpeg_bytes), len(compressed))
             return compressed
         except Exception as e:
-            log.debug("Image compression skipped: %s", e)
+            log.warning("Image compression skipped: %s", e)
             return jpeg_bytes
 
     def analyze(self, jpeg_bytes):
@@ -130,6 +130,7 @@ class VisionAnalysisService:
                 sprite_keys=", ".join(self._sprite_keys[:100])
             )
 
+            t0 = time.time()
             response = self._client.models.generate_content(
                 model=config.GEMINI_MODEL,
                 contents=[
@@ -141,10 +142,11 @@ class VisionAnalysisService:
                     )
                 ],
                 config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    thinking_config=types.ThinkingConfig(thinking_budget=1024),
                 ),
             )
 
+            log.info("Gemini API call took %.1fs (%d bytes sent)", time.time() - t0, len(jpeg_bytes))
             text = response.text.strip()
             # Strip markdown fences if present
             if text.startswith("```"):
