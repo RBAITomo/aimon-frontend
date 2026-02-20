@@ -140,6 +140,9 @@ class VisionAnalysisService:
                         ]
                     )
                 ],
+                config=types.GenerateContentConfig(
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
             )
 
             text = response.text.strip()
