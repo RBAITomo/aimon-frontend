@@ -136,6 +136,7 @@ class FoodSpriteManager:
                 if t >= 1.0:
                     item.state = "done"
                     completed.append(item)
+                    log.info("Food tween completed: %s", item.food_name)
             # Remove done items
             self._items = deque(item for item in self._items if item.state != "done")
         return completed

@@ -132,7 +132,7 @@ SFX_CHANNEL_AMBIENT = 3   # warning, ambient
 # Food sprite overlay
 FOOD_SPRITE_SIZE = 40
 FOOD_SPRITE_MAX = 3
-FOOD_TWEEN_FRAMES = 20
+FOOD_TWEEN_FRAMES = 45
 # 3 fixed slot positions near pet (below character, spaced horizontally)
 FOOD_SLOT_POSITIONS = [
     (CHAR_SPRITE_X + 10, CHAR_SPRITE_Y + CHAR_SPRITE_SIZE[1] - 10),
