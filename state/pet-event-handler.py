@@ -31,6 +31,7 @@ class PetEventHandler:
         self._regression_pending = False
         self._warning_frames = 0
         self._quest_text = None          # current quest question text
+        self._quest_dismissed = False    # True after user starts talking; suppresses restore
 
     # --- WebSocket Callbacks ---
 
@@ -59,11 +60,13 @@ class PetEventHandler:
         # Parse quest from pet_status (reconnect/refresh scenario)
         quest = data.get("quest")
         if quest and quest.get("text"):
-            self._quest_text = quest["text"]
-            log.debug("Quest restored from pet_status: %s", self._quest_text[:50])
-        elif quest is None and self._quest_text:
-            # Server confirms quest answered — clear display
+            if not self._quest_dismissed:
+                self._quest_text = quest["text"]
+                log.debug("Quest restored from pet_status: %s", self._quest_text[:50])
+        elif quest is None:
+            # Server confirms quest answered — clear display and reset flag
             self._quest_text = None
+            self._quest_dismissed = False
             log.debug("Quest cleared (answered)")
 
         self._display.on_stats_changed()
@@ -132,6 +135,7 @@ class PetEventHandler:
     def on_quest_start(self, data):
         """Display quest question — child answers via normal voice flow."""
         self._sfx.play("quest")
+        self._quest_dismissed = False
         self._quest_text = data.get("quest_text", data.get("question", ""))
         log.info("Quest started: %s", self._quest_text[:50] if self._quest_text else "empty")
 
@@ -194,3 +198,4 @@ class PetEventHandler:
 
     def clear_quest(self):
         self._quest_text = None
+        self._quest_dismissed = True

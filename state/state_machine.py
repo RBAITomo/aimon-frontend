@@ -386,8 +386,8 @@ class StateMachine:
         """Handle feed result after camera food confirmation."""
         if success:
             log.info("Fed with %s (hunger -%d)", food_name, hunger_reduction)
-            # Trigger eating animation briefly
-            self._pet_state.animation = "eating"
+            # Use "eating" as the emotion so _set_state(EMOTION) picks it up
+            self._current_emotion = "eating"
             self._emotion_tick = 0
             self._set_state(State.EMOTION)
         else:
@@ -478,8 +478,14 @@ class StateMachine:
             self._sfx.unduck()
 
         # Return to IDLE when emotion animation completes or after 3s timeout
-        if state == State.EMOTION and (done or self._emotion_tick > 90):
-            self._set_state(State.IDLE)
+        if state == State.EMOTION:
+            # Eating: play eating anim for ~3s, then switch to happy for remainder
+            if self._current_emotion == "eating" and self._emotion_tick >= 90:
+                self._current_emotion = "happy"
+                self._pet_state.animation = "happy"
+            elif (done and self._emotion_tick >= 60) or self._emotion_tick > 150:
+                self._current_emotion = "happy"  # restore default emotion
+                self._set_state(State.IDLE)
 
         # Quest clears server-side via pet_status (not on LISTENING)
         # Child may need multiple attempts, quest persists until answered correctly
