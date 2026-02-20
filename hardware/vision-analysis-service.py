@@ -86,6 +86,25 @@ class VisionAnalysisService:
     def rate_limited(self):
         return time.time() - self._last_call < self._min_interval
 
+    def _compress_image(self, jpeg_bytes, max_dim=512, quality=70):
+        """Resize and recompress JPEG to reduce upload size."""
+        try:
+            import io
+            from PIL import Image
+            img = Image.open(io.BytesIO(jpeg_bytes))
+            w, h = img.size
+            if max(w, h) > max_dim:
+                ratio = max_dim / max(w, h)
+                img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality)
+            compressed = buf.getvalue()
+            log.debug("Image compressed: %d -> %d bytes", len(jpeg_bytes), len(compressed))
+            return compressed
+        except Exception as e:
+            log.debug("Image compression skipped: %s", e)
+            return jpeg_bytes
+
     def analyze(self, jpeg_bytes):
         """Analyze JPEG image bytes. Returns dict with is_food, food_name, description.
 
@@ -103,6 +122,9 @@ class VisionAnalysisService:
 
         try:
             from google.genai import types
+
+            # Downscale image to reduce upload time from Pi
+            jpeg_bytes = self._compress_image(jpeg_bytes)
 
             prompt = VISION_PROMPT_TEMPLATE.format(
                 sprite_keys=", ".join(self._sprite_keys[:100])
