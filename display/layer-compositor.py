@@ -125,12 +125,14 @@ class LayerCompositor:
             self._rebuild_base(pet_state)
         surface.blit(self._base_surface, (0, 0))
 
-        # Layer 3: Character sprite
+        # Layer 3: Character sprite (dynamic position for movable stages)
         frame, done = self._sprite_mgr.get_frame(
-            pet_state.stage, pet_state.animation, tick
+            pet_state.stage, pet_state.animation, tick, pet_state.direction
         )
         if frame:
-            surface.blit(frame, (config.CHAR_SPRITE_X, config.CHAR_SPRITE_Y))
+            cx = pet_state.char_x if pet_state.char_x >= 0 else config.CHAR_SPRITE_X
+            cy = pet_state.char_y if pet_state.char_y >= 0 else config.CHAR_SPRITE_Y
+            surface.blit(frame, (cx, cy))
 
         # Layer 4: Speech bubble
         if text:

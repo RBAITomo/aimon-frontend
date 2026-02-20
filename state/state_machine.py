@@ -44,6 +44,9 @@ PetEventHandler = _pet_handler_mod.PetEventHandler
 _food_mgr_mod = importlib.import_module("state.food-sprite-manager")
 FoodSpriteManager = _food_mgr_mod.FoodSpriteManager
 
+_move_mod = importlib.import_module("display.character-movement-engine")
+CharacterMovementEngine = _move_mod.CharacterMovementEngine
+
 
 class State(enum.Enum):
     IDLE = "idle"
@@ -109,6 +112,9 @@ class StateMachine:
         self._evolution_new_stage = "baby"
         self._evolution_tick = 0
         self._evolution_holding = False   # True = flash done, holding new form
+
+        # Character movement engine (autonomous wandering for child/adult)
+        self._movement = CharacterMovementEngine()
 
         # SFX, badge popup, food sprite manager, and pet event handler
         self._sfx = SfxManager()
@@ -438,6 +444,25 @@ class StateMachine:
 
         if state == State.EMOTION:
             self._emotion_tick += 1
+
+        # Character movement: wander during IDLE for movable stages
+        with self._pet_lock:
+            current_stage = self._pet_state.stage
+        is_movable = current_stage in config.MOVABLE_STAGES
+        self._movement.set_enabled(is_movable and state == State.IDLE)
+        if is_movable:
+            move_anim = self._movement.tick()
+            with self._pet_lock:
+                self._pet_state.char_x = self._movement.x
+                self._pet_state.char_y = self._movement.y
+                self._pet_state.direction = self._movement.direction
+                if state == State.IDLE:
+                    self._pet_state.animation = move_anim
+        else:
+            with self._pet_lock:
+                self._pet_state.char_x = -1
+                self._pet_state.char_y = -1
+                self._pet_state.direction = "south"
 
         # Tick warning countdown
         if self._pet_handler.tick_warning():

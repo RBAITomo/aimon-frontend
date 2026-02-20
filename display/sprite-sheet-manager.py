@@ -1,7 +1,8 @@
 """Sprite manager for frame-based character assets.
 
-Loads individual PNG frames from assets/{stage}/animations/{anim}/south/ dirs.
+Loads individual PNG frames from assets/{stage}/animations/{anim}/{direction}/ dirs.
 Scales frames to CHAR_SPRITE_SIZE. Supports stage transitions by loading/unloading.
+For movable stages (child/adult), loads all 8 directions. Others load south only.
 Falls back to code-generated placeholder shapes for missing stages.
 """
 
@@ -22,21 +23,25 @@ _PLACEHOLDER_COLORS = {
     "adult": (180, 100, 200),
 }
 
+# All supported direction subdirectory names
+_ALL_DIRECTIONS = [
+    "south", "south-east", "east", "north-east",
+    "north", "north-west", "west", "south-west",
+]
+
 
 class SpriteSheetManager:
     """Loads per-stage frame animations, returns frame by tick."""
 
     def __init__(self):
-        self._frames = {}       # {(stage, animation): [Surface, ...]}
-        self._meta = {}         # {(stage, animation): {"fps": int, "loop": bool}}
+        # {(stage, animation, direction): [Surface, ...]}
+        self._frames = {}
+        # {(stage, animation): {"fps": int, "loop": bool}}
+        self._meta = {}
         self._loaded_stages = set()
 
     def load_stage(self, stage):
-        """Load all animations for a given evolution stage.
-
-        Looks up asset folder from STAGE_ASSET_MAP in config. If no assets
-        exist, generates colored placeholder frames.
-        """
+        """Load all animations for a given evolution stage."""
         if stage in self._loaded_stages:
             return
         self._loaded_stages.add(stage)
@@ -48,32 +53,51 @@ class SpriteSheetManager:
         else:
             self._generate_placeholder(stage)
 
-        # Ensure at least an idle animation exists
-        if (stage, "idle") not in self._frames:
+        # Ensure at least an idle animation exists (south direction)
+        if (stage, "idle", "south") not in self._frames:
             self._load_static_rotation(stage)
 
-        loaded = [a for s, a in self._frames if s == stage]
-        log.info("Stage '%s' loaded: %s", stage, loaded)
+        loaded = set(a for s, a, d in self._frames if s == stage)
+        log.info("Stage '%s' loaded animations: %s", stage, sorted(loaded))
+
+        if stage in config.MOVABLE_STAGES:
+            if (stage, "walking", "south") not in self._frames:
+                log.warning("Stage '%s' is movable but has no walking animation", stage)
 
     def _load_from_assets(self, stage, asset_path):
-        """Load animations from assets/{stage}/animations/{name}/south/ dirs."""
+        """Load animations from assets/{stage}/animations/{name}/{direction}/ dirs."""
         anim_dir = os.path.join(asset_path, "animations")
         if not os.path.isdir(anim_dir):
             return
 
+        is_movable = stage in config.MOVABLE_STAGES
+
         for folder_name in os.listdir(anim_dir):
-            south_dir = os.path.join(anim_dir, folder_name, "south")
-            if not os.path.isdir(south_dir):
+            folder_path = os.path.join(anim_dir, folder_name)
+            if not os.path.isdir(folder_path):
                 continue
 
-            # Map folder name to internal animation name
             internal_name = config.ANIMATION_MAP.get(folder_name, folder_name)
-            frames = self._load_frames_from_dir(south_dir)
-            if frames:
-                self._frames[(stage, internal_name)] = frames
-                # Default metadata: looping idle, one-shot for others
-                is_loop = internal_name in ("idle", "listening", "speaking")
-                fps = 8 if internal_name == "idle" else 10
+            is_loop = internal_name in ("idle", "listening", "speaking", "walking")
+            fps = 8 if internal_name == "idle" else 10
+
+            # Determine which directions to load
+            if is_movable:
+                dirs_to_load = _ALL_DIRECTIONS
+            else:
+                dirs_to_load = ["south"]
+
+            loaded_any = False
+            for direction in dirs_to_load:
+                dir_path = os.path.join(folder_path, direction)
+                if not os.path.isdir(dir_path):
+                    continue
+                frames = self._load_frames_from_dir(dir_path)
+                if frames:
+                    self._frames[(stage, internal_name, direction)] = frames
+                    loaded_any = True
+
+            if loaded_any:
                 self._meta[(stage, internal_name)] = {"fps": fps, "loop": is_loop}
 
     def _load_static_rotation(self, stage):
@@ -89,7 +113,6 @@ class SpriteSheetManager:
         if not os.path.isdir(rot_dir):
             return
 
-        # Define rocking sequence for a gentle wobble animation
         rock_sequence = [
             "south.png", "south-east.png", "east.png", "south-east.png",
             "south.png", "south-west.png", "west.png", "south-west.png",
@@ -104,7 +127,7 @@ class SpriteSheetManager:
 
         if not frames:
             return
-        self._frames[(stage, "idle")] = frames
+        self._frames[(stage, "idle", "south")] = frames
         self._meta[(stage, "idle")] = {"fps": 4, "loop": True}
 
     def _load_frames_from_dir(self, directory):
@@ -137,31 +160,40 @@ class SpriteSheetManager:
         font = pygame.font.SysFont("dejavusans", 14)
 
         surf = pygame.Surface((w, h), pygame.SRCALPHA)
-        # Rounded rectangle body
         pygame.draw.rect(surf, color, (10, 10, w - 20, h - 20), border_radius=12)
         pygame.draw.rect(surf, (0, 0, 0), (10, 10, w - 20, h - 20), 2, border_radius=12)
-        # Stage label
         label = font.render(stage.upper(), True, (255, 255, 255))
         lx = (w - label.get_width()) // 2
         ly = (h - label.get_height()) // 2
         surf.blit(label, (lx, ly))
 
-        self._frames[(stage, "idle")] = [surf]
+        self._frames[(stage, "idle", "south")] = [surf]
         self._meta[(stage, "idle")] = {"fps": 1, "loop": True}
 
-    def get_frame(self, stage, animation, tick):
+    def get_frame(self, stage, animation, tick, direction="south"):
         """Return (Surface, bool_done) for animation at tick.
 
-        Falls back to idle if requested animation not found.
+        Args:
+            stage: Evolution stage name.
+            animation: Animation name (idle, walking, etc.).
+            tick: Current animation tick counter.
+            direction: Facing direction (south, north, east, etc.).
+
+        Falls back: requested direction -> south -> idle south.
         """
-        key = (stage, animation)
-        if key not in self._frames or not self._frames[key]:
-            key = (stage, "idle")
+        key = (stage, animation, direction)
+        if key not in self._frames:
+            key = (stage, animation, "south")
+        if key not in self._frames:
+            key = (stage, "idle", direction)
+        if key not in self._frames:
+            key = (stage, "idle", "south")
         frames = self._frames.get(key)
         if not frames:
             return None, True
 
-        meta = self._meta.get(key, {"fps": 10, "loop": True})
+        resolved_anim = key[1]
+        meta = self._meta.get((stage, resolved_anim), {"fps": 10, "loop": True})
         anim_fps = meta["fps"]
         loops = meta["loop"]
 
@@ -179,6 +211,6 @@ class SpriteSheetManager:
         keys_to_remove = [k for k in self._frames if k[0] == stage]
         for k in keys_to_remove:
             del self._frames[k]
-            self._meta.pop(k, None)
+            self._meta.pop((k[0], k[1]), None)
         self._loaded_stages.discard(stage)
         log.info("Unloaded stage '%s'", stage)

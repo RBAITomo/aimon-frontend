@@ -70,13 +70,28 @@ ANIMATION_MAP = {
     "custom-speaking, happy mood": "speaking",
     "eating": "eating",
     "jump": "jump",
+    "talking": "speaking",
 }
 
 # Evolution stage -> asset folder mapping
 STAGE_ASSET_MAP = {
     "egg": "Coneko-egg-form",
     "baby": "Coneko-baby-Form",
+    "child": "Coneko-child-form",
+    "adult": "Coneko-adult-form",
 }
+
+# Stages that support free movement (have multi-direction walking assets)
+MOVABLE_STAGES = {"child", "adult"}
+
+# Movement zone (lower half of content area, character wanders within)
+MOVE_ZONE_Y_MIN = CONTENT_Y_START + 10
+MOVE_ZONE_Y_MAX = CONTENT_Y_END - CHAR_SPRITE_SIZE[1] - 10
+MOVE_ZONE_X_MIN = 10
+MOVE_ZONE_X_MAX = LCD_WIDTH - CHAR_SPRITE_SIZE[0] - 10
+MOVE_SPEED = 1.0  # pixels per frame (~30px/s at 30fps)
+MOVE_IDLE_MIN_FRAMES = 60   # 2s minimum idle pause
+MOVE_IDLE_MAX_FRAMES = 150  # 5s maximum idle pause
 
 # --- Hardware Pins (BOARD numbering) ---
 PIN_BUTTON = 11
