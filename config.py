@@ -116,7 +116,7 @@ LED_CAMERA = (200, 100, 255)  # purple — camera capture in progress
 
 # --- Gemini Vision (direct from Pi) ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-001")
 VISION_ENABLED = bool(GEMINI_API_KEY) and CAMERA_ENABLED
 
 # --- SFX & Audio ---
