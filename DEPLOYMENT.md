@@ -153,6 +153,35 @@ BACKEND_WS_URL=ws://192.168.1.100:8080
 BACKEND_WS_URL=wss://aimon.example.com:8443
 ```
 
+### WiFi QR Manager
+
+If the Pi loses WiFi, you can reconnect using the embedded WiFi QR scanner:
+
+**How to use:**
+1. Ensure camera (`CAMERA_ENABLED=true`) is enabled
+2. In offline mode, hold button ≥1.5 seconds (long-press)
+3. LED turns bright cyan — WiFi QR scan active
+4. Point at standard WiFi QR code
+5. Auto-connects and profiles saved locally
+
+**Requirements:**
+- `libzbar0` library (included in setup.sh)
+- OV5647 camera or compatible CSI camera
+- NetworkManager (`nmcli` available)
+
+**Profiles Storage:**
+- Location: `data/wifi-profiles.json`
+- Format: JSON with SSID, password, type
+- Profiles deduped by SSID
+
+**Config Constants (in `config.py`):**
+```python
+WIFI_PROFILES_PATH = os.path.join(..., "data", "wifi-profiles.json")
+WIFI_QR_SCAN_TIMEOUT_S = 15        # QR decode timeout
+LED_WIFI_SCAN = (0, 200, 255)      # Bright cyan LED during scan
+LONG_PRESS_THRESHOLD_MS = 1500     # Hold ≥1.5s for WiFi QR
+```
+
 ### Performance Tuning
 
 Edit `config.py`:

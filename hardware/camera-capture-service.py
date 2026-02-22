@@ -46,13 +46,13 @@ class CameraCaptureService:
         """Whether capture is currently rate-limited."""
         return time.time() - self._last_capture < self._min_interval
 
-    def capture_bytes(self):
+    def capture_bytes(self, bypass_rate_limit=False):
         """Capture photo, return raw JPEG bytes or None."""
         if not self._initialized:
             return None
 
         now = time.time()
-        if now - self._last_capture < self._min_interval:
+        if not bypass_rate_limit and now - self._last_capture < self._min_interval:
             remaining = int(self._min_interval - (now - self._last_capture))
             log.info("Camera rate-limited, wait %ds", remaining)
             return None

@@ -129,6 +129,13 @@ CAMERA_RATE_LIMIT_S = 30  # min seconds between captures
 CAMERA_DOUBLE_PRESS_MS = 500  # max ms between presses for double-press detection
 LED_CAMERA = (200, 100, 255)  # purple — camera capture in progress
 
+# --- WiFi Manager ---
+WIFI_PROFILES_PATH = os.path.join(os.path.dirname(__file__), "data", "wifi-profiles.json")
+WIFI_CONNECT_TIMEOUT_S = 30
+WIFI_QR_SCAN_TIMEOUT_S = 15
+LED_WIFI_SCAN = (0, 200, 255)  # cyan — QR WiFi scan in progress
+LONG_PRESS_THRESHOLD_MS = 1500  # hold ≥1.5s = long press (WiFi QR in offline)
+
 # --- Gemini Vision (direct from Pi) ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")

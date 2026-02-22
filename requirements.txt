@@ -6,6 +6,8 @@ numpy>=1.24
 google-genai>=1.0.0
 spidev>=3.6
 python-dotenv>=1.0.0
+pyzbar>=0.1.9
+Pillow>=10.0.0
 
 # Testing dependencies
 pytest>=7.4.0

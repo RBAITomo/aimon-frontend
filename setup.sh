@@ -15,7 +15,8 @@ sudo apt-get install -y \
     libasound2-dev \
     python3-rpi-lgpio \
     i2c-tools \
-    rpicam-apps
+    rpicam-apps \
+    libzbar0
 
 # Create virtual environment
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -14,7 +14,8 @@ Thin client frontend for AI-MON v0.2 — Pygame-based UI running on Raspberry Pi
 - **Local Turn Logging:** SQLite storage (200 turns max)
 - **Sprite Animation:** Emotion-based character rendering
 - **RGB LED Feedback:** State-driven color indicators
-- **Auto-Reconnect:** 5 attempts with 2s interval
+- **Auto-Reconnect:** Exponential backoff (2s→60s cap)
+- **WiFi QR Manager:** Long-press to scan WiFi credentials in offline mode
 
 ## Hardware Requirements
 
@@ -120,7 +121,8 @@ sudo apt-get install -y \
     libopus-dev libopus0 \
     libasound2-dev \
     libspidev-dev \
-    python3-rpi-lgpio
+    python3-rpi-lgpio \
+    libzbar0
 ```
 ### Step 2: Enable SPI
 
@@ -501,7 +503,38 @@ ls -lh data/turns.db
 | 🟡 Yellow | ASR | Processing speech |
 | 🔵 Cyan | ANSWER | Playing response |
 | 🟡 Warm Yellow | EMOTION | Showing emotion |
-| 🔴 Red | OFFLINE | Disconnected from backend |
+| 🟣 Purple | CAMERA | Capturing vision |
+| 🟦 Cyan (bright) | WIFI_SCAN | Scanning WiFi QR code |
+| 🟨 Amber | OFFLINE | Offline mode (tamagotchi gameplay) |
+| 🔴 Red | ERROR | Backend disconnected |
+
+## WiFi QR Manager
+
+### Offline WiFi Setup
+
+When the Pi loses WiFi connectivity, you can reconnect using an embedded WiFi QR scanner:
+
+**How to use:**
+1. Hold the button for ≥1.5 seconds (long-press) in offline mode
+2. LED turns bright cyan — WiFi QR scan in progress
+3. Point camera at WiFi QR code (standard `WIFI:S:...;T:...;P:...;` format)
+4. Scanner decodes SSID, password, and security type
+5. Auto-connects via `nmcli` network manager
+6. Profile saved to `data/wifi-profiles.json` for quick reconnect
+
+**Supported QR Format:**
+- Standard WiFi QR format with SSID, password, and encryption type
+- Compatible with most WiFi QR generators
+
+**Profile Storage:**
+- Profiles persisted locally (JSON format)
+- Enables seamless reconnection without re-scanning
+- Deduplicated by SSID — password updated if rescanned
+
+**Hardware Requirements:**
+- OV5647 CSI camera (integrated on Pi Zero 2)
+- `libzbar0` library (installed via setup.sh)
+- NetworkManager (`nmcli` command)
 
 ## Performance
 

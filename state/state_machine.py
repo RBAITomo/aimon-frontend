@@ -54,6 +54,9 @@ OfflineResponseBank = _rbank_mod.OfflineResponseBank
 _engine_mod = importlib.import_module("state.offline-game-engine")
 OfflineGameEngine = _engine_mod.OfflineGameEngine
 
+_wifi_mod = importlib.import_module("hardware.wifi-manager")
+WifiManager = _wifi_mod.WifiManager
+
 
 class State(enum.Enum):
     IDLE = "idle"
@@ -106,8 +109,10 @@ class StateMachine:
         self._last_press_time = 0.0
         self._press_pending = False  # True = waiting to see if double-press
         self._press_timer = None
+        self._press_start_time = 0.0  # for long-press detection
         self._press_lock = threading.Lock()
         self._vision = None
+        self._wifi_manager = WifiManager(config.WIFI_PROFILES_PATH)
         if config.CAMERA_ENABLED:
             self._camera = CameraCaptureService(min_interval_s=config.CAMERA_RATE_LIMIT_S)
             self._camera.initialize()
@@ -201,6 +206,9 @@ class StateMachine:
             self._capture.stop()
 
     def _on_button_press(self):
+        with self._press_lock:
+            self._press_start_time = time.time()
+
         if self._state == State.EVOLUTION:
             if self._evolution_holding:
                 # Exit evolution: restore background and go idle
@@ -307,9 +315,86 @@ class StateMachine:
 
         threading.Thread(target=_capture_and_analyze, daemon=True).start()
 
+    def _trigger_wifi_qr_scan(self):
+        """Continuous QR scan loop (offline long-press). Runs in daemon thread."""
+        if not self._camera or not self._camera.available:
+            self._show_offline_text("Camera không khả dụng")
+            return
+
+        self._hat.set_rgb_tuple(config.LED_WIFI_SCAN)
+        self._show_offline_text("Đang quét mã QR...")
+        log.info("WiFi QR scan started (offline long-press)")
+
+        def _scan_loop():
+            deadline = time.time() + config.WIFI_QR_SCAN_TIMEOUT_S
+            found = False
+            try:
+                while time.time() < deadline:
+                    try:
+                        jpeg_bytes = self._camera.capture_bytes(bypass_rate_limit=True)
+                    except Exception as e:
+                        log.warning("Camera capture failed: %s", e)
+                        time.sleep(0.5)
+                        continue
+
+                    if not jpeg_bytes:
+                        time.sleep(0.5)
+                        continue
+
+                    result = self._wifi_manager.scan_qr_for_wifi(jpeg_bytes)
+                    if result:
+                        found = True
+                        ssid = result["ssid"]
+                        password = result["password"]
+
+                        self._show_offline_text(f"Tìm thấy: {ssid}")
+                        log.info("WiFi QR decoded: ssid=%s", ssid)
+                        time.sleep(1.5)
+
+                        self._wifi_manager.add_profile(ssid, password)
+                        self._show_offline_text("Đang kết nối...")
+
+                        success = self._wifi_manager.connect_to_profile(ssid, password)
+                        if success:
+                            self._show_offline_text("Kết nối thành công!")
+                            log.info("Connected to %s, triggering reconnect", ssid)
+                            time.sleep(2)
+                            threading.Thread(target=self._reconnect_loop, daemon=True).start()
+                        else:
+                            self._show_offline_text("Lỗi kết nối")
+                        break
+
+                    time.sleep(0.5)
+
+                if not found:
+                    self._show_offline_text("Không tìm thấy mã QR")
+                    log.info("WiFi QR scan timed out after %ds", config.WIFI_QR_SCAN_TIMEOUT_S)
+
+            except Exception as e:
+                log.error("WiFi QR scan error: %s", e)
+                self._show_offline_text("Lỗi kết nối")
+            finally:
+                self._hat.set_rgb_tuple(config.LED_OFFLINE)
+
+        threading.Thread(target=_scan_loop, daemon=True).start()
+
     def _on_button_release(self):
         if self._state == State.LISTENING:
             self._stop_listening()
+
+        # Long-press detection: WiFi QR scan (offline only)
+        is_long = False
+        if self._offline:
+            with self._press_lock:
+                hold_ms = (time.time() - self._press_start_time) * 1000
+                if self._press_start_time > 0 and hold_ms >= config.LONG_PRESS_THRESHOLD_MS:
+                    is_long = True
+                    self._press_pending = False
+                    if self._press_timer:
+                        self._press_timer.cancel()
+                        self._press_timer = None
+        if is_long:
+            self._trigger_wifi_qr_scan()
 
     def _start_listening(self):
         self._set_state(State.LISTENING)
