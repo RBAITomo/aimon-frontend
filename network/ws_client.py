@@ -24,6 +24,7 @@ class WSClient:
         self._session_id = None
         self._recv_thread = None
         self._running = False
+        self._stop_reconnect_event = threading.Event()
 
         # Callbacks (set by StateMachine)
         self.on_hello_ack = None
@@ -47,6 +48,7 @@ class WSClient:
         self.on_pet_warning = None
         self.on_pet_regression = None
         self.on_quest_start = None
+        self.on_sync_result = None
 
     def connect(self):
         url = f"{config.BACKEND_WS_URL}/ws/audio/{config.ROBOT_ID}"
@@ -72,17 +74,26 @@ class WSClient:
             return False
 
     def reconnect(self):
-        """Attempt reconnect with retry logic."""
+        """Infinite reconnect with exponential backoff (capped)."""
         self.disconnect()
-        for attempt in range(1, config.WS_RECONNECT_MAX_ATTEMPTS + 1):
-            log.info("Reconnect attempt %d/%d", attempt, config.WS_RECONNECT_MAX_ATTEMPTS)
+        self._stop_reconnect_event.clear()
+        delay = config.WS_RECONNECT_INITIAL_S
+        attempt = 0
+        while not self._stop_reconnect_event.is_set():
+            attempt += 1
+            log.info("Reconnect attempt %d (delay=%.0fs)", attempt, delay)
             if self.connect():
                 if self.on_reconnect:
                     self.on_reconnect()
                 return True
-            time.sleep(config.WS_RECONNECT_INTERVAL_S)
-        log.error("Reconnect failed after %d attempts", config.WS_RECONNECT_MAX_ATTEMPTS)
+            self._stop_reconnect_event.wait(timeout=delay)
+            delay = min(delay * 2, config.WS_RECONNECT_BACKOFF_CAP_S)
+        log.info("Reconnect stopped by stop event")
         return False
+
+    def stop_reconnect(self):
+        """Stop the infinite reconnect loop (for app shutdown)."""
+        self._stop_reconnect_event.set()
 
     def disconnect(self):
         """Close WebSocket connection and stop receive thread."""
@@ -141,6 +152,14 @@ class WSClient:
     def send_feed_confirm(self, food_name="unknown", sprite_key="default"):
         """Confirm feeding after food detection (food analyzed on Pi)."""
         self._send_json({"type": "pet_feed_confirm", "food_name": food_name, "sprite_key": sprite_key})
+
+    def send_offline_sync(self, events: list, state_snapshot: dict):
+        """Send offline events and state snapshot for backend sync."""
+        self._send_json({
+            "type": "offline_sync",
+            "events": events,
+            "state": state_snapshot,
+        })
 
     def send_ping(self):
         self._send_json({"type": "ping"})
@@ -261,6 +280,10 @@ class WSClient:
         elif msg_type == "quest_start":
             if self.on_quest_start:
                 self.on_quest_start(msg)
+
+        elif msg_type == "sync_result":
+            if self.on_sync_result:
+                self.on_sync_result(msg)
 
         elif msg_type == "pong":
             log.debug("Pong received")

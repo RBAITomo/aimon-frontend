@@ -8,8 +8,8 @@ load_dotenv()
 # --- Backend Connection ---
 BACKEND_WS_URL = os.getenv("BACKEND_WS_URL", "ws://localhost:8080")
 ROBOT_ID = os.getenv("ROBOT_ID", "1")  # numeric userId or pet name from pet_profiles
-WS_RECONNECT_INTERVAL_S = 2
-WS_RECONNECT_MAX_ATTEMPTS = 5
+WS_RECONNECT_INTERVAL_S = 2  # deprecated: kept for test compat
+WS_RECONNECT_MAX_ATTEMPTS = 5  # deprecated: replaced by infinite backoff
 WS_PING_INTERVAL_S = 15
 
 # --- Audio ---
@@ -121,7 +121,7 @@ LED_ASR = (200, 180, 0)  # yellow
 LED_ANSWER = (0, 180, 200)  # cyan
 LED_EMOTION_HAPPY = (255, 200, 0)  # warm yellow
 LED_EMOTION_SAD = (80, 80, 200)  # blue
-LED_OFFLINE = (200, 30, 30)  # red
+LED_OFFLINE = (255, 140, 0)  # amber (offline indicator)
 
 # --- Camera ---
 CAMERA_ENABLED = os.getenv("CAMERA_ENABLED", "true").lower() == "true"
@@ -166,3 +166,14 @@ REGRESSION_ANIM_FRAMES = 120  # 4 seconds
 # SFX ducking (volume scale 0.0-1.0)
 SFX_DUCK_VOLUME = 0.3
 SFX_NORMAL_VOLUME = 1.0
+
+# --- Offline Gameplay ---
+OFFLINE_EVENT_MAX = 1000
+OFFLINE_DECAY_INTERVAL_S = 60
+OFFLINE_FEED_COOLDOWN_S = 30
+OFFLINE_FEED_HUNGER_REDUCTION = 15
+OFFLINE_XP_INTERACTION = 5
+OFFLINE_XP_FEED = 3
+OFFLINE_DB_PATH = TURN_DB_PATH  # reuse same DB
+WS_RECONNECT_INITIAL_S = 2
+WS_RECONNECT_BACKOFF_CAP_S = 60

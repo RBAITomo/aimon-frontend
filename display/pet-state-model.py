@@ -24,3 +24,14 @@ class PetState:
     xp: int = 0
     xp_for_next: int = 50        # XP needed for next level
     mood: str = "neutral"
+    offline_since_ts: float = 0.0
+
+    def clamp_stats(self):
+        """Clamp hunger/energy/happiness to 0-100."""
+        self.hunger = max(0, min(100, self.hunger))
+        self.energy = max(0, min(100, self.energy))
+        self.happiness = max(0, min(100, self.happiness))
+
+    def is_critical(self) -> bool:
+        """True if any stat is at dangerous level."""
+        return self.hunger >= 80 or self.energy <= 20

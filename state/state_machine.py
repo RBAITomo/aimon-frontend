@@ -47,6 +47,13 @@ FoodSpriteManager = _food_mgr_mod.FoodSpriteManager
 _move_mod = importlib.import_module("display.character-movement-engine")
 CharacterMovementEngine = _move_mod.CharacterMovementEngine
 
+_journal_mod = importlib.import_module("state.offline-event-journal")
+OfflineEventJournal = _journal_mod.OfflineEventJournal
+_rbank_mod = importlib.import_module("state.offline-response-bank")
+OfflineResponseBank = _rbank_mod.OfflineResponseBank
+_engine_mod = importlib.import_module("state.offline-game-engine")
+OfflineGameEngine = _engine_mod.OfflineGameEngine
+
 
 class State(enum.Enum):
     IDLE = "idle"
@@ -125,6 +132,12 @@ class StateMachine:
             self._sfx, self._badge_popup, self._food_mgr, self._ws,
         )
 
+        # Offline gameplay components
+        self._offline_journal = OfflineEventJournal()
+        self._offline_response_bank = OfflineResponseBank()
+        self._offline_engine = None
+        self._pending_sync_ids = []  # event IDs awaiting sync_result
+
         # Set default background
         self._display.set_background("marshmallow-meadow.png")
 
@@ -155,6 +168,7 @@ class StateMachine:
         self._ws.on_pet_warning = self._pet_handler.on_pet_warning
         self._ws.on_pet_regression = self._pet_handler.on_pet_regression
         self._ws.on_quest_start = self._pet_handler.on_quest_start
+        self._ws.on_sync_result = self._on_sync_result
 
     _LED_MAP = {
         State.IDLE: config.LED_IDLE, State.LISTENING: config.LED_LISTENING,
@@ -209,13 +223,17 @@ class StateMachine:
             elapsed_ms = (now - self._last_press_time) * 1000
             self._last_press_time = now
 
-            # Double-press detected -> camera capture
+            # Double-press detected
             if self._press_pending and elapsed_ms < config.CAMERA_DOUBLE_PRESS_MS:
                 self._press_pending = False
                 if self._press_timer:
                     self._press_timer.cancel()
                     self._press_timer = None
-                self._trigger_camera()
+                if self._offline and self._offline_engine:
+                    self._offline_engine.on_feed()
+                    self._sfx.play("eat")
+                else:
+                    self._trigger_camera()
                 return
 
             # First press -> wait to see if double-press follows
@@ -230,10 +248,10 @@ class StateMachine:
         with self._press_lock:
             self._press_pending = False
             self._press_timer = None
-        if self._state == State.IDLE:
-            if self._offline:
-                self._play_offline_clip()
-            else:
+        if self._state in (State.IDLE, State.OFFLINE):
+            if self._offline and self._offline_engine:
+                self._offline_engine.on_interaction()
+            elif not self._offline:
                 self._start_listening()
 
     def _trigger_camera(self):
@@ -318,6 +336,15 @@ class StateMachine:
 
     def _on_hello_ack(self, session_id):
         log.info("Session established: %s", session_id)
+        # Flush offline events before going online
+        if self._offline_engine:
+            snapshot = self._offline_engine.stop()
+            events = self._offline_journal.get_all_pending_for_sync()
+            if events:
+                self._pending_sync_ids = [e["id"] for e in events]
+                self._ws.send_offline_sync(events=events, state_snapshot=snapshot)
+                log.info("Sent %d offline events for sync", len(events))
+            self._offline_engine = None
         self._offline = False
         self._set_state(State.IDLE)
 
@@ -400,10 +427,20 @@ class StateMachine:
             log.warning("Feed failed for %s", food_name)
 
     def _on_disconnect(self):
+        if self._offline and self._offline_engine and self._offline_engine.running:
+            return  # already in offline mode
         self._ensure_mic_off()
         self._playback.stop()
         self._offline = True
-        self._set_state(State.IDLE)
+        self._set_state(State.OFFLINE)
+        # Start offline game engine
+        self._offline_engine = OfflineGameEngine(
+            pet_state_updater=self._apply_offline_stat_update,
+            display_callback=self._show_offline_text,
+            journal=self._offline_journal,
+            response_bank=self._offline_response_bank,
+        )
+        self._offline_engine.start(time.time())
         self._play_offline_clip()
         threading.Thread(target=self._reconnect_loop, daemon=True).start()
 
@@ -427,6 +464,49 @@ class StateMachine:
     def _reconnect_loop(self):
         self._ws.reconnect()
         # hello is sent by _on_reconnect callback, no need to send again
+
+    def _apply_offline_stat_update(self, hunger_delta=0, energy_delta=0, happiness_delta=0):
+        """Apply stat deltas during offline mode (thread-safe). Returns stats dict."""
+        with self._pet_lock:
+            self._pet_state.hunger += hunger_delta
+            self._pet_state.energy += energy_delta
+            self._pet_state.happiness += happiness_delta
+            self._pet_state.clamp_stats()
+            stats = {
+                "hunger": self._pet_state.hunger,
+                "energy": self._pet_state.energy,
+                "happiness": self._pet_state.happiness,
+            }
+        self._display.on_stats_changed()
+        return stats
+
+    def _show_offline_text(self, text: str):
+        """Display Vietnamese text bubble during offline mode."""
+        self._last_bubble_text = text
+
+    def _on_sync_result(self, msg):
+        """Handle sync_result from backend — overwrite local state with authoritative values."""
+        status = msg.get("status")
+        if status == "error":
+            log.error("Sync failed: %s", msg.get("reason"))
+            return
+
+        pet_status = msg.get("pet_status", {})
+        if pet_status:
+            with self._pet_lock:
+                for key in ("hunger", "energy", "happiness", "level", "xp",
+                            "xp_for_next", "stage", "variant", "mood"):
+                    if key in pet_status:
+                        setattr(self._pet_state, key, pet_status[key])
+                self._pet_state.clamp_stats()
+            self._display.on_stats_changed()
+
+        # Mark only the flushed events as synced and clear
+        if self._pending_sync_ids:
+            self._offline_journal.mark_synced(self._pending_sync_ids)
+            self._offline_journal.clear_synced()
+            self._pending_sync_ids = []
+        log.info("Sync complete: %d events processed", msg.get("events_processed", 0))
 
     def tick(self):
         """Called once per frame (30 FPS). Updates display for current state."""
@@ -482,7 +562,7 @@ class StateMachine:
         if quest and state == State.IDLE:
             text = quest
         else:
-            text = self._last_bubble_text if state in (State.ANSWER, State.EMOTION, State.IDLE) else None
+            text = self._last_bubble_text if state in (State.ANSWER, State.EMOTION, State.IDLE, State.OFFLINE) else None
 
         # Snapshot pet state under lock to avoid torn reads from WS thread
         with self._pet_lock:
@@ -601,5 +681,4 @@ class StateMachine:
         if self._ws.connect():
             self._ws.send_hello()
         else:
-            self._offline = True
-            threading.Thread(target=self._reconnect_loop, daemon=True).start()
+            self._on_disconnect()
