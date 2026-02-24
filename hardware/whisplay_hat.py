@@ -54,27 +54,37 @@ class WhisplayHAT:
         # Enable backlight immediately (active-low: LOW = on)
         GPIO.output(config.PIN_BACKLIGHT, GPIO.LOW)
 
-        # Prefer pigpio DMA PWM (flicker-free) over RPi.GPIO software PWM.
-        # RPi.GPIO uses a Python thread + time.sleep() which causes visible
-        # flicker at mid-range duty cycles due to Linux scheduler jitter.
-        # pigpio uses DMA so timing is CPU/scheduler independent.
+        # Prefer stable PWM over RPi.GPIO software PWM.
+        # RPi.GPIO uses a Python thread + time.sleep() → OS scheduler jitter → visible flicker.
+        # Priority: lgpio (Bookworm/kernel 6.6+ compatible, apt) → pigpio DMA (older OS, manual
+        # install) → RPi.GPIO (last resort).
+        self._lgpio_h = None
         self._pi = None
         self._bl_pwm = None
         try:
-            import pigpio
-            pi = pigpio.pi()
-            if not pi.connected:
-                raise RuntimeError("pigpiod not running — run: sudo systemctl start pigpiod")
-            # range 0-100 maps 1:1 to brightness; 800 Hz is well above flicker threshold
-            pi.set_PWM_range(_BACKLIGHT_BCM, 100)
-            pi.set_PWM_frequency(_BACKLIGHT_BCM, 800)
-            pi.set_PWM_dutycycle(_BACKLIGHT_BCM, 0)  # 0 = GPIO always LOW = full brightness
-            self._pi = pi
-            log.info("Backlight: pigpio DMA PWM at 800 Hz (flicker-free)")
-        except Exception as e:
-            log.warning("pigpio unavailable (%s); falling back to RPi.GPIO software PWM", e)
-            self._bl_pwm = GPIO.PWM(config.PIN_BACKLIGHT, 800)
-            self._bl_pwm.start(0)  # 0% duty = LOW = backlight ON
+            import lgpio
+            h = lgpio.gpiochip_open(0)
+            # duty 0 = GPIO always LOW = full brightness (active-low backlight)
+            lgpio.tx_pwm(h, _BACKLIGHT_BCM, 800, 0)
+            self._lgpio_h = h
+            log.info("Backlight: lgpio software PWM at 800 Hz (Bookworm-compatible)")
+        except Exception as e_lg:
+            log.warning("lgpio unavailable (%s); trying pigpio DMA PWM", e_lg)
+            try:
+                import pigpio
+                pi = pigpio.pi()
+                if not pi.connected:
+                    raise RuntimeError("pigpiod not running — run: sudo systemctl start pigpiod")
+                # range 0-100 maps 1:1 to brightness; 800 Hz is well above flicker threshold
+                pi.set_PWM_range(_BACKLIGHT_BCM, 100)
+                pi.set_PWM_frequency(_BACKLIGHT_BCM, 800)
+                pi.set_PWM_dutycycle(_BACKLIGHT_BCM, 0)  # 0 = GPIO always LOW = full brightness
+                self._pi = pi
+                log.info("Backlight: pigpio DMA PWM at 800 Hz (flicker-free)")
+            except Exception as e_pi:
+                log.warning("pigpio unavailable (%s); falling back to RPi.GPIO software PWM", e_pi)
+                self._bl_pwm = GPIO.PWM(config.PIN_BACKLIGHT, 800)
+                self._bl_pwm.start(0)  # 0% duty = LOW = backlight ON
 
         # SPI bus
         self.spi = spidev.SpiDev()
@@ -187,11 +197,14 @@ class WhisplayHAT:
                 self.spi.writebytes(rgb565_bytes[i:i + _CHUNK])
 
     def set_backlight(self, brightness):
-        """Set LCD backlight 0-100. Uses pigpio DMA PWM if available."""
+        """Set LCD backlight 0-100. Uses lgpio/pigpio PWM if available."""
         if not 0 <= brightness <= 100:
             return
         duty = 100 - brightness  # active-low: duty 0 = full on, 100 = off
-        if self._pi is not None:
+        if self._lgpio_h is not None:
+            import lgpio
+            lgpio.tx_pwm(self._lgpio_h, _BACKLIGHT_BCM, 800, duty)
+        elif self._pi is not None:
             self._pi.set_PWM_dutycycle(_BACKLIGHT_BCM, duty)
         elif self._bl_pwm is not None:
             self._bl_pwm.ChangeDutyCycle(duty)
@@ -334,8 +347,15 @@ class WhisplayHAT:
         except Exception:
             pass
 
-        # Stop backlight PWM (pigpio or RPi.GPIO)
-        if self._pi is not None:
+        # Stop backlight PWM (lgpio → pigpio → RPi.GPIO)
+        if self._lgpio_h is not None:
+            try:
+                import lgpio
+                lgpio.tx_pwm(self._lgpio_h, _BACKLIGHT_BCM, 0, 0)  # cancel PWM
+                lgpio.gpiochip_close(self._lgpio_h)
+            except Exception:
+                pass
+        elif self._pi is not None:
             try:
                 self._pi.set_PWM_dutycycle(_BACKLIGHT_BCM, 100)  # backlight off
                 self._pi.stop()
