@@ -9,6 +9,7 @@ python-dotenv>=1.0.0
 pyzbar>=0.1.9
 Pillow>=10.0.0
 smbus2>=0.4.2
+pigpio>=1.78
 
 # Testing dependencies
 pytest>=7.4.0

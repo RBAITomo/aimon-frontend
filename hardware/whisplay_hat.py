@@ -16,6 +16,9 @@ import config
 
 log = logging.getLogger(__name__)
 
+# BOARD pin 15 = BCM 22; pigpio uses BCM numbering for DMA PWM
+_BACKLIGHT_BCM = 22
+
 
 class WhisplayHAT:
     """Singleton wrapper for Whisplay HAT peripherals."""
@@ -50,9 +53,28 @@ class WhisplayHAT:
         )
         # Enable backlight immediately (active-low: LOW = on)
         GPIO.output(config.PIN_BACKLIGHT, GPIO.LOW)
-        # Backlight PWM (duty 0 = LOW = full brightness for active-low)
-        self._bl_pwm = GPIO.PWM(config.PIN_BACKLIGHT, 1000)
-        self._bl_pwm.start(0)  # 0% duty = LOW = backlight ON
+
+        # Prefer pigpio DMA PWM (flicker-free) over RPi.GPIO software PWM.
+        # RPi.GPIO uses a Python thread + time.sleep() which causes visible
+        # flicker at mid-range duty cycles due to Linux scheduler jitter.
+        # pigpio uses DMA so timing is CPU/scheduler independent.
+        self._pi = None
+        self._bl_pwm = None
+        try:
+            import pigpio
+            pi = pigpio.pi()
+            if not pi.connected:
+                raise RuntimeError("pigpiod not running — run: sudo systemctl start pigpiod")
+            # range 0-100 maps 1:1 to brightness; 800 Hz is well above flicker threshold
+            pi.set_PWM_range(_BACKLIGHT_BCM, 100)
+            pi.set_PWM_frequency(_BACKLIGHT_BCM, 800)
+            pi.set_PWM_dutycycle(_BACKLIGHT_BCM, 0)  # 0 = GPIO always LOW = full brightness
+            self._pi = pi
+            log.info("Backlight: pigpio DMA PWM at 800 Hz (flicker-free)")
+        except Exception as e:
+            log.warning("pigpio unavailable (%s); falling back to RPi.GPIO software PWM", e)
+            self._bl_pwm = GPIO.PWM(config.PIN_BACKLIGHT, 800)
+            self._bl_pwm.start(0)  # 0% duty = LOW = backlight ON
 
         # SPI bus
         self.spi = spidev.SpiDev()
@@ -165,9 +187,14 @@ class WhisplayHAT:
                 self.spi.writebytes(rgb565_bytes[i:i + _CHUNK])
 
     def set_backlight(self, brightness):
-        """Set LCD backlight 0-100."""
-        if 0 <= brightness <= 100:
-            self._bl_pwm.ChangeDutyCycle(100 - brightness)
+        """Set LCD backlight 0-100. Uses pigpio DMA PWM if available."""
+        if not 0 <= brightness <= 100:
+            return
+        duty = 100 - brightness  # active-low: duty 0 = full on, 100 = off
+        if self._pi is not None:
+            self._pi.set_PWM_dutycycle(_BACKLIGHT_BCM, duty)
+        elif self._bl_pwm is not None:
+            self._bl_pwm.ChangeDutyCycle(duty)
 
     # ===== RGB LED (common-anode, PWM) =====
 
@@ -307,7 +334,20 @@ class WhisplayHAT:
         except Exception:
             pass
 
-        for pwm in ('_r_pwm', '_g_pwm', '_b_pwm', '_bl_pwm'):
+        # Stop backlight PWM (pigpio or RPi.GPIO)
+        if self._pi is not None:
+            try:
+                self._pi.set_PWM_dutycycle(_BACKLIGHT_BCM, 100)  # backlight off
+                self._pi.stop()
+            except Exception:
+                pass
+        elif self._bl_pwm is not None:
+            try:
+                self._bl_pwm.stop()
+            except Exception:
+                pass
+
+        for pwm in ('_r_pwm', '_g_pwm', '_b_pwm'):
             try:
                 getattr(self, pwm).stop()
             except Exception:
