@@ -146,9 +146,10 @@ class StateMachine:
         self._offline_engine = None
         self._pending_sync_ids = []  # event IDs awaiting sync_result
 
-        # Backlight auto-dim state
+        # Backlight auto-dim / standby state
         self._last_activity = time.time()
         self._backlight_dimmed = False
+        self._in_standby = False
         self._last_battery_refresh = 0.0  # epoch 0 triggers first refresh immediately
 
         # Battery monitor (Waveshare UPS HAT C / INA219 at 0x43)
@@ -618,9 +619,14 @@ class StateMachine:
     def tick(self):
         """Called once per frame (adaptive FPS). Updates display for current state."""
         self._tick += 1
-        # Backlight dim check: ~1s at active FPS, ~3s at idle FPS (acceptable for 60s timeout)
+        # Backlight dim / standby check every ~1s
         if self._tick % 10 == 0:
             self._check_backlight_dim()
+
+        # Standby: backlight off, no rendering — just keep loop alive at 1fps
+        if self._in_standby:
+            return
+
         state = self._state
 
         # Check for pending evolution event (can arrive in any state)
@@ -787,20 +793,32 @@ class StateMachine:
     def _notify_activity(self):
         """Reset backlight dim timer and restore brightness on any user action."""
         self._last_activity = time.time()
-        if self._backlight_dimmed:
+        if self._in_standby:
+            self._in_standby = False
+            self._backlight_dimmed = False
+            self._hat.set_backlight(100)
+            self._display.invalidate()  # force full redraw after black standby screen
+        elif self._backlight_dimmed:
             self._hat.set_backlight(100)
             self._backlight_dimmed = False
 
     def _check_backlight_dim(self):
-        """Dim backlight after BACKLIGHT_DIM_TIMEOUT_S of inactivity."""
-        if not self._backlight_dimmed:
-            if time.time() - self._last_activity > config.BACKLIGHT_DIM_TIMEOUT_S:
-                self._hat.set_backlight(config.BACKLIGHT_DIM_PCT)
-                self._backlight_dimmed = True
+        """Dim backlight at BACKLIGHT_DIM_TIMEOUT_S; enter standby at STANDBY_TIMEOUT_S."""
+        idle_s = time.time() - self._last_activity
+        if not self._in_standby and idle_s > config.STANDBY_TIMEOUT_S:
+            self._hat.set_backlight(0)
+            self._hat.fill_screen(0x0000)
+            self._in_standby = True
+            self._backlight_dimmed = True
+        elif not self._backlight_dimmed and idle_s > config.BACKLIGHT_DIM_TIMEOUT_S:
+            self._hat.set_backlight(config.BACKLIGHT_DIM_PCT)
+            self._backlight_dimmed = True
 
     @property
     def target_fps(self) -> int:
-        """Return LCD_FPS_IDLE during IDLE or OFFLINE (no active audio/turn), LCD_FPS otherwise."""
+        """Return LCD_FPS_STANDBY in standby, LCD_FPS_IDLE during IDLE/OFFLINE, LCD_FPS otherwise."""
+        if self._in_standby:
+            return config.LCD_FPS_STANDBY
         return config.LCD_FPS_IDLE if self._state in (State.IDLE, State.OFFLINE) else config.LCD_FPS
 
     @property

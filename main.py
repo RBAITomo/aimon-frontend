@@ -82,9 +82,9 @@ def main():
     # --- Connect to backend ---
     sm.initial_connect()
 
-    # --- Main event loop (adaptive FPS: 30 active / 10 idle) ---
-    log.info("Entering main loop (active=%d FPS, idle=%d FPS)",
-             config.LCD_FPS, config.LCD_FPS_IDLE)
+    # --- Main event loop (adaptive FPS: 30 active / 10 idle / 1 standby) ---
+    log.info("Entering main loop (active=%d FPS, idle=%d FPS, standby=%d FPS)",
+             config.LCD_FPS, config.LCD_FPS_IDLE, config.LCD_FPS_STANDBY)
     try:
         while running:
             # Poll Pygame events (needed even without a window)

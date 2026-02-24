@@ -145,6 +145,10 @@ class DisplayEngine:
         """Notify compositor that stats changed (forces base rebuild)."""
         self._compositor.mark_dirty()
 
+    def invalidate(self):
+        """Force full redraw on next render (e.g. after standby black screen)."""
+        self._compositor.mark_dirty()
+
     def _draw_centered_text(self, text, font, color, y):
         """Draw horizontally centered text at given y position."""
         surf = font.render(text, True, color)
