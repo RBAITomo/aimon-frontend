@@ -191,5 +191,7 @@ BATTERY_MONITOR_INTERVAL_S = 60  # poll interval in seconds
 
 # --- Power Save ---
 LCD_FPS_IDLE = 10                # fps in IDLE state (vs LCD_FPS=30 active)
+LCD_FPS_STANDBY = 1              # minimal loop rate in standby (keeps pygame alive)
 BACKLIGHT_DIM_TIMEOUT_S = 60     # seconds of inactivity before dim
 BACKLIGHT_DIM_PCT = 20           # backlight % when dimmed
+STANDBY_TIMEOUT_S = 120          # seconds of inactivity before standby (backlight off + stop render)
