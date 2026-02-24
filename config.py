@@ -30,7 +30,7 @@ SPRITE_DIR = os.path.join(os.path.dirname(__file__), "sprites")
 # --- Pet UI Layout (240x280 portrait) ---
 # Top stat bar region
 STAT_BAR_HEIGHT = 24
-STAT_BAR_WIDTH = 60
+STAT_BAR_WIDTH = 52          # reduced from 60 to leave room for battery icon
 STAT_BAR_THICKNESS = 6
 STAT_BAR_Y = 9
 STAT_BAR_GAP = 8
@@ -184,3 +184,12 @@ OFFLINE_XP_FEED = 3
 OFFLINE_DB_PATH = TURN_DB_PATH  # reuse same DB
 WS_RECONNECT_INITIAL_S = 2
 WS_RECONNECT_BACKOFF_CAP_S = 60
+
+# --- Battery Monitor (Waveshare UPS HAT C / INA219 at 0x43) ---
+BATTERY_MONITOR_ENABLED = True
+BATTERY_MONITOR_INTERVAL_S = 60  # poll interval in seconds
+
+# --- Power Save ---
+LCD_FPS_IDLE = 10                # fps in IDLE state (vs LCD_FPS=30 active)
+BACKLIGHT_DIM_TIMEOUT_S = 60     # seconds of inactivity before dim
+BACKLIGHT_DIM_PCT = 20           # backlight % when dimmed

@@ -21,6 +21,23 @@ _XP_COLOR = (80, 200, 180)
 _XP_BG = (40, 40, 55)
 _LABEL_COLOR = (180, 180, 200)
 
+# Battery icon colors
+_BAT_HIGH = (60, 180, 80)    # green  >50%
+_BAT_MID = (200, 180, 60)    # yellow 20-50%
+_BAT_LOW = (200, 60, 60)     # red    <20%
+_BAT_UNKNOWN = (100, 100, 110)  # grey  unavailable
+_BAT_OUTLINE = (160, 160, 180)
+
+# Battery icon geometry (top-right of stat bar region)
+# Body: 21×6px outline; nub: 3×4px cap; fill: 19×4px inside body
+_BAT_X = 213
+_BAT_Y = 9   # same as STAT_BAR_Y
+_BAT_BODY_W = 21
+_BAT_BODY_H = 6
+_BAT_NUB_W = 3
+_BAT_NUB_H = 4
+_BAT_FILL_MAX_W = 19  # max fill width inside body
+
 
 class StatBarRenderer:
     """Draws stat bars in top region and XP bar in bottom region."""
@@ -106,6 +123,40 @@ class StatBarRenderer:
             fill_w = int(bw * fill_pct)
             if fill_w > 0:
                 pygame.draw.rect(surface, _XP_COLOR, (bx, y, fill_w, bar_h))
+
+    def render_battery_icon(self, surface, battery_pct: int):
+        """Draw a small battery icon in the top-right corner of the stat bar region.
+
+        Args:
+            surface: Target surface.
+            battery_pct: 0-100 percentage, or -1 if unavailable.
+        """
+        x, y = _BAT_X, _BAT_Y
+
+        # Choose fill color by level
+        if battery_pct < 0:
+            fill_col = _BAT_UNKNOWN
+            fill_w = 0
+        elif battery_pct > 50:
+            fill_col = _BAT_HIGH
+            fill_w = int(_BAT_FILL_MAX_W * battery_pct / 100)
+        elif battery_pct > 20:
+            fill_col = _BAT_MID
+            fill_w = int(_BAT_FILL_MAX_W * battery_pct / 100)
+        else:
+            fill_col = _BAT_LOW
+            fill_w = max(1, int(_BAT_FILL_MAX_W * battery_pct / 100))
+
+        # Body outline
+        pygame.draw.rect(surface, _BAT_OUTLINE, (x, y, _BAT_BODY_W, _BAT_BODY_H), 1)
+
+        # Fill inside body (1px inset from outline)
+        if fill_w > 0:
+            pygame.draw.rect(surface, fill_col, (x + 1, y + 1, fill_w, _BAT_BODY_H - 2))
+
+        # Terminal nub (right side cap)
+        nub_y = y + (_BAT_BODY_H - _BAT_NUB_H) // 2
+        pygame.draw.rect(surface, _BAT_OUTLINE, (x + _BAT_BODY_W, nub_y, _BAT_NUB_W, _BAT_NUB_H))
 
     @staticmethod
     def _lerp_color(c1, c2, t):

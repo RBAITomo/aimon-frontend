@@ -115,6 +115,7 @@ class LayerCompositor:
         current_stats = (
             pet_state.hunger, pet_state.energy, pet_state.happiness,
             pet_state.level, pet_state.xp, pet_state.xp_for_next,
+            pet_state.battery_pct,
         )
         if current_stats != self._last_stats:
             self._base_dirty = True
@@ -160,6 +161,11 @@ class LayerCompositor:
         self._stat_renderer.render_stat_bars(
             self._base_surface,
             pet_state.hunger, pet_state.energy, pet_state.happiness,
+        )
+
+        # Battery icon (top-right corner)
+        self._stat_renderer.render_battery_icon(
+            self._base_surface, pet_state.battery_pct,
         )
 
         # Bottom XP bar

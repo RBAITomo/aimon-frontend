@@ -82,8 +82,9 @@ def main():
     # --- Connect to backend ---
     sm.initial_connect()
 
-    # --- Main event loop (30 FPS) ---
-    log.info("Entering main loop at %d FPS", config.LCD_FPS)
+    # --- Main event loop (adaptive FPS: 30 active / 10 idle) ---
+    log.info("Entering main loop (active=%d FPS, idle=%d FPS)",
+             config.LCD_FPS, config.LCD_FPS_IDLE)
     try:
         while running:
             # Poll Pygame events (needed even without a window)
@@ -94,8 +95,8 @@ def main():
             # State machine tick: updates display + handles timeouts
             sm.tick()
 
-            # Cap frame rate
-            clock.tick(config.LCD_FPS)
+            # Adaptive FPS: 10fps in IDLE to reduce CPU load, 30fps when active
+            clock.tick(sm.target_fps)
 
     except KeyboardInterrupt:
         log.info("KeyboardInterrupt received")

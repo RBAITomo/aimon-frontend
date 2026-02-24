@@ -57,6 +57,9 @@ OfflineGameEngine = _engine_mod.OfflineGameEngine
 _wifi_mod = importlib.import_module("hardware.wifi-manager")
 WifiManager = _wifi_mod.WifiManager
 
+_battery_mod = importlib.import_module("hardware.battery-monitor")
+BatteryMonitor = _battery_mod.BatteryMonitor
+
 
 class State(enum.Enum):
     IDLE = "idle"
@@ -143,6 +146,21 @@ class StateMachine:
         self._offline_engine = None
         self._pending_sync_ids = []  # event IDs awaiting sync_result
 
+        # Backlight auto-dim state
+        self._last_activity = time.time()
+        self._backlight_dimmed = False
+        self._last_battery_refresh = 0.0  # epoch 0 triggers first refresh immediately
+
+        # Battery monitor (Waveshare UPS HAT C / INA219 at 0x43)
+        self._battery = None
+        if config.BATTERY_MONITOR_ENABLED:
+            self._battery = BatteryMonitor(
+                poll_interval_s=config.BATTERY_MONITOR_INTERVAL_S
+            )
+            # Apply initial reading to pet state immediately
+            with self._pet_lock:
+                self._pet_state.battery_pct = self._battery.battery_pct
+
         # Set default background
         self._display.set_background("marshmallow-meadow.png")
 
@@ -192,6 +210,9 @@ class StateMachine:
         self._tick = 0
         self._hat.set_rgb_tuple(self._LED_MAP.get(new_state, config.LED_IDLE))
         self._display.reset_scroll()
+        # Any active state (non-IDLE) resets backlight dim timer
+        if new_state != State.IDLE:
+            self._notify_activity()
 
         # Update pet animation based on new state
         if new_state == State.EMOTION:
@@ -206,6 +227,7 @@ class StateMachine:
             self._capture.stop()
 
     def _on_button_press(self):
+        self._notify_activity()  # any button press resets backlight dim timer
         with self._press_lock:
             self._press_start_time = time.time()
 
@@ -594,8 +616,11 @@ class StateMachine:
         log.info("Sync complete: %d events processed", msg.get("events_processed", 0))
 
     def tick(self):
-        """Called once per frame (30 FPS). Updates display for current state."""
+        """Called once per frame (adaptive FPS). Updates display for current state."""
         self._tick += 1
+        # Backlight dim check: ~1s at active FPS, ~3s at idle FPS (acceptable for 60s timeout)
+        if self._tick % 10 == 0:
+            self._check_backlight_dim()
         state = self._state
 
         # Check for pending evolution event (can arrive in any state)
@@ -648,6 +673,12 @@ class StateMachine:
             text = quest
         else:
             text = self._last_bubble_text if state in (State.ANSWER, State.EMOTION, State.IDLE, State.OFFLINE) else None
+
+        # Refresh battery % every 60s (time-based, FPS-independent)
+        if self._battery and time.time() - self._last_battery_refresh >= config.BATTERY_MONITOR_INTERVAL_S:
+            self._last_battery_refresh = time.time()
+            with self._pet_lock:
+                self._pet_state.battery_pct = self._battery.battery_pct
 
         # Snapshot pet state under lock to avoid torn reads from WS thread
         with self._pet_lock:
@@ -752,6 +783,25 @@ class StateMachine:
                 if hasattr(self._pet_state, key):
                     setattr(self._pet_state, key, value)
         self._display.on_stats_changed()
+
+    def _notify_activity(self):
+        """Reset backlight dim timer and restore brightness on any user action."""
+        self._last_activity = time.time()
+        if self._backlight_dimmed:
+            self._hat.set_backlight(100)
+            self._backlight_dimmed = False
+
+    def _check_backlight_dim(self):
+        """Dim backlight after BACKLIGHT_DIM_TIMEOUT_S of inactivity."""
+        if not self._backlight_dimmed:
+            if time.time() - self._last_activity > config.BACKLIGHT_DIM_TIMEOUT_S:
+                self._hat.set_backlight(config.BACKLIGHT_DIM_PCT)
+                self._backlight_dimmed = True
+
+    @property
+    def target_fps(self) -> int:
+        """Return LCD_FPS_IDLE during IDLE or OFFLINE (no active audio/turn), LCD_FPS otherwise."""
+        return config.LCD_FPS_IDLE if self._state in (State.IDLE, State.OFFLINE) else config.LCD_FPS
 
     @property
     def state(self):

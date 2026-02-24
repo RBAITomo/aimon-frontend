@@ -25,6 +25,7 @@ class PetState:
     xp_for_next: int = 50        # XP needed for next level
     mood: str = "neutral"
     offline_since_ts: float = 0.0
+    battery_pct: int = -1         # 0-100 from BatteryMonitor; -1 = unavailable
 
     def clamp_stats(self):
         """Clamp hunger/energy/happiness to 0-100."""

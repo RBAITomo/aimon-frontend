@@ -1,6 +1,8 @@
 """Camera capture service for OV5647 via picamera2.
 
-Captures JPEG to memory (no disk I/O), returns base64 string.
+Captures JPEG to memory (no disk I/O), returns raw bytes.
+Power-gated: Picamera2 is opened, captured, then immediately closed on
+each call so the ISP draws no current between captures (~150–250 mA saving).
 Graceful fallback on non-Pi platforms (returns None).
 """
 
@@ -12,33 +14,32 @@ log = logging.getLogger(__name__)
 
 
 class CameraCaptureService:
-    """OV5647 CSI camera capture with rate limiting."""
+    """OV5647 CSI camera capture with rate limiting and per-capture power gating."""
 
     def __init__(self, min_interval_s=30):
-        self._camera = None
         self._last_capture = 0.0
         self._min_interval = min_interval_s
         self._initialized = False
 
     def initialize(self):
-        """Initialize picamera2. Call once at startup."""
+        """Test camera availability without keeping it open (power-save).
+
+        Sets self._initialized so available property works. Does not hold
+        the camera open — each capture call opens/closes its own instance.
+        """
         try:
             from picamera2 import Picamera2
-            self._camera = Picamera2()
-            config = self._camera.create_still_configuration(
-                main={"size": (640, 480), "format": "RGB888"}
-            )
-            self._camera.configure(config)
-            self._camera.start()
+            cam = Picamera2()
+            cam.close()
             self._initialized = True
-            log.info("Camera initialized (640x480 JPEG)")
+            log.info("Camera available (640x480, power-gated per capture)")
         except Exception as e:
             log.warning("Camera init failed (expected on non-Pi): %s", e)
             self._initialized = False
 
     @property
     def available(self):
-        """Whether camera is initialized and ready."""
+        """Whether camera hardware is present and picamera2 is importable."""
         return self._initialized
 
     @property
@@ -47,7 +48,11 @@ class CameraCaptureService:
         return time.time() - self._last_capture < self._min_interval
 
     def capture_bytes(self, bypass_rate_limit=False):
-        """Capture photo, return raw JPEG bytes or None."""
+        """Capture photo, return raw JPEG bytes or None.
+
+        Opens Picamera2 → captures → closes on each call to power-gate
+        the sensor and ISP between captures.
+        """
         if not self._initialized:
             return None
 
@@ -57,9 +62,17 @@ class CameraCaptureService:
             log.info("Camera rate-limited, wait %ds", remaining)
             return None
 
+        cam = None
         try:
+            from picamera2 import Picamera2
+            cam = Picamera2()
+            cfg = cam.create_still_configuration(
+                main={"size": (640, 480), "format": "RGB888"}
+            )
+            cam.configure(cfg)
+            cam.start()
             stream = io.BytesIO()
-            self._camera.capture_file(stream, format="jpeg")
+            cam.capture_file(stream, format="jpeg")
             stream.seek(0)
             data = stream.read()
             self._last_capture = now
@@ -68,13 +81,17 @@ class CameraCaptureService:
         except Exception as e:
             log.error("Camera capture failed: %s", e)
             return None
+        finally:
+            if cam is not None:
+                try:
+                    cam.stop()
+                except Exception:
+                    pass
+                try:
+                    cam.close()
+                except Exception:
+                    pass
 
     def cleanup(self):
-        """Stop camera. Call on shutdown."""
-        if self._camera:
-            try:
-                self._camera.stop()
-            except Exception:
-                pass
-            self._camera = None
-            self._initialized = False
+        """No-op: camera is already closed after each capture."""
+        self._initialized = False

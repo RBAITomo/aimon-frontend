@@ -1,6 +1,12 @@
+# Claude context files
+CLAUDE.md
+
 __pycache__/
 *.pyc
+*.pyo
 .venv/
+venv/
+env/
 data/
 *.db
 sprites/idle/*.png
