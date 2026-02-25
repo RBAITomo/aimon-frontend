@@ -21,7 +21,7 @@ class SpeechBubbleRenderer:
     """Draws speech bubble overlay with wrapped, scrolling text."""
 
     def __init__(self):
-        self._font = pygame.font.SysFont("dejavusans", 13)
+        self._font = pygame.font.SysFont("dejavusans", 16)
         self._line_height = self._font.get_linesize()
         self._scroll_offset = 0
         # Pre-create alpha surface for bubble background

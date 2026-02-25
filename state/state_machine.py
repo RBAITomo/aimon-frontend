@@ -192,6 +192,7 @@ class StateMachine:
         self._ws.on_pet_warning = self._pet_handler.on_pet_warning
         self._ws.on_pet_regression = self._pet_handler.on_pet_regression
         self._ws.on_quest_start = self._pet_handler.on_quest_start
+        self._ws.on_location_changed = self._pet_handler.on_location_changed
         self._ws.on_sync_result = self._on_sync_result
 
     _LED_MAP = {
