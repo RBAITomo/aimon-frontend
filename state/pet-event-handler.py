@@ -70,6 +70,15 @@ class PetEventHandler:
             log.debug("Quest cleared (answered)")
 
         self._display.on_stats_changed()
+
+        # Restore background from pet_status (on connect/reconnect)
+        background = data.get("background")
+        if background and self._display:
+            try:
+                self._display.set_background(background)
+            except Exception as e:
+                log.warning("Failed to set background from pet_status: %s", e)
+
         log.debug("Pet status updated: lvl=%d stage=%s", self._pet_state.level, self._pet_state.stage)
 
         # Auto-eat stored food when hunger increases

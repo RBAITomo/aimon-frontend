@@ -162,8 +162,7 @@ class StateMachine:
             with self._pet_lock:
                 self._pet_state.battery_pct = self._battery.battery_pct
 
-        # Set default background
-        self._display.set_background("marshmallow-meadow.png")
+        # Background set dynamically from pet_status on connect
 
         self._register_callbacks()
 
@@ -238,7 +237,6 @@ class StateMachine:
                 # Exit evolution: restore background and go idle
                 self._pet_handler.end_evolution()
                 self._display.clear_black_background()
-                self._display.set_background("marshmallow-meadow.png")
                 self._set_state(State.IDLE)
             # During flash phase, ignore button (don't cut the animation short)
             return
