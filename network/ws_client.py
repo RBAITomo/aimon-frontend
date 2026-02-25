@@ -49,6 +49,7 @@ class WSClient:
         self.on_pet_regression = None
         self.on_quest_start = None
         self.on_sync_result = None
+        self.on_location_changed = None
 
     def connect(self):
         url = f"{config.BACKEND_WS_URL}/ws/audio/{config.ROBOT_ID}"
@@ -284,6 +285,10 @@ class WSClient:
         elif msg_type == "sync_result":
             if self.on_sync_result:
                 self.on_sync_result(msg)
+
+        elif msg_type == "location_changed":
+            if self.on_location_changed:
+                self.on_location_changed(msg)
 
         elif msg_type == "pong":
             log.debug("Pong received")

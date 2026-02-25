@@ -139,6 +139,17 @@ class PetEventHandler:
         self._quest_text = data.get("quest_text", data.get("question", ""))
         log.info("Quest started: %s", self._quest_text[:50] if self._quest_text else "empty")
 
+    def on_location_changed(self, data):
+        """Handle sub-location travel — swap background image."""
+        background = data.get("background")
+        location_code = data.get("location_code")
+        log.info("Location changed to %s, background: %s", location_code, background)
+        if background and self._display:
+            try:
+                self._display.set_background(background)
+            except Exception as e:
+                log.warning("Failed to set background %s: %s", background, e)
+
     def on_camera_result(self, data):
         """Handle camera analysis result from backend (legacy path)."""
         if data.get("is_food"):
