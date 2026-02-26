@@ -103,6 +103,10 @@ class StateMachine:
         self._turn_start_time = 0
         self._last_bubble_text = None
 
+        # Conversation mode: single press toggles, VAD auto-detects speech end
+        self._conversation_mode = False
+        self._finishing_turn = False  # guard against double _finish_turn_after_playback
+
         # Pet state for compositor rendering (guarded by _pet_lock)
         self._pet_state = PetState()
         self._pet_lock = threading.Lock()
@@ -243,6 +247,13 @@ class StateMachine:
 
         if self._state == State.ANSWER:
             self._interrupt()
+            self._conversation_mode = False
+            return
+
+        # Button during LISTENING in conversation mode: stop & send, exit conversation
+        if self._state == State.LISTENING:
+            self._conversation_mode = False
+            self._stop_listening()
             return
 
         if self._state != State.IDLE:
@@ -282,6 +293,7 @@ class StateMachine:
             if self._offline and self._offline_engine:
                 self._offline_engine.on_interaction()
             elif not self._offline:
+                self._conversation_mode = True
                 self._start_listening()
 
     def _trigger_camera(self):
@@ -401,9 +413,6 @@ class StateMachine:
         threading.Thread(target=_scan_loop, daemon=True).start()
 
     def _on_button_release(self):
-        if self._state == State.LISTENING:
-            self._stop_listening()
-
         # Long-press detection: WiFi QR scan (offline only)
         is_long = False
         if self._offline:
@@ -425,7 +434,7 @@ class StateMachine:
         self._pet_handler.clear_quest()  # clear quest bubble when child starts speaking
         self._turn_start_time = time.time()
         self._ws.send_audio_start()
-        self._capture.start()
+        self._capture.start(vad=True, on_vad_stop=self._on_vad_stop)
 
     def _stop_listening(self):
         pcm_frames = self._capture.stop()
@@ -435,6 +444,35 @@ class StateMachine:
                 self._ws.send_audio_frame(f)
             self._ws.send_audio_stop()
         threading.Thread(target=_send, daemon=True).start()
+
+    def _on_vad_stop(self, vad_result, has_speech):
+        """Called from AudioCapture thread when VAD detects speech end."""
+        if self._state != State.LISTENING:
+            return
+        log.info("VAD triggered: %s (has_speech=%s)", vad_result.value, has_speech)
+        # If max duration with no meaningful speech in conversation mode, exit quietly
+        _vad_mod = importlib.import_module("audio.voice-activity-detector")
+        if vad_result == _vad_mod.VadResult.MAX_DURATION and self._conversation_mode:
+            if not has_speech:
+                log.info("Conversation idle timeout — no speech, exiting conversation mode")
+                self._conversation_mode = False
+                self._capture.stop()
+                self._set_state(State.IDLE)
+                return
+        self._stop_listening()
+
+    def _auto_resume_listening(self):
+        """Auto-resume mic after playback in conversation mode."""
+        if not self._conversation_mode:
+            return
+        if self._offline:
+            self._conversation_mode = False
+            return
+        self._sfx.play("listen-resume")
+        # Small delay for SFX to play before opening mic
+        time.sleep(0.15)
+        if self._conversation_mode and self._state == State.IDLE:
+            self._start_listening()
 
     def _interrupt(self):
         self._playback.stop()
@@ -464,6 +502,9 @@ class StateMachine:
         else:
             log.info("Empty ASR result, returning to IDLE")
             self._set_state(State.IDLE)
+            # In conversation mode, auto-resume even on empty ASR
+            if self._conversation_mode:
+                threading.Thread(target=self._auto_resume_listening, daemon=True).start()
 
     def _on_llm_stream(self, token, done):
         if self._state in (State.ASR, State.ANSWER):
@@ -497,17 +538,29 @@ class StateMachine:
         )
         # Defer EMOTION transition until playback queue drains
         # (turn_end can arrive before all binary PCM chunks are played)
-        threading.Thread(
-            target=self._finish_turn_after_playback, daemon=True
-        ).start()
+        if not self._finishing_turn:
+            self._finishing_turn = True
+            threading.Thread(
+                target=self._finish_turn_after_playback, daemon=True
+            ).start()
 
     def _finish_turn_after_playback(self):
-        """Wait for playback queue to drain, then transition to EMOTION."""
+        """Wait for playback queue to drain, then transition to EMOTION.
+
+        In conversation mode: show brief EMOTION (~1s / 30 frames) then auto-resume.
+        """
         timeout = time.time() + 30  # safety: 30s max wait
         while self._playing_active() and time.time() < timeout:
             time.sleep(0.05)
         self._emotion_tick = 0
         self._set_state(State.EMOTION)
+        self._finishing_turn = False
+
+        if self._conversation_mode:
+            # Brief EMOTION display (~1s) then auto-resume
+            time.sleep(1.0)
+            self._set_state(State.IDLE)
+            threading.Thread(target=self._auto_resume_listening, daemon=True).start()
 
     def _playing_active(self):
         """Check if playback is still active (thread running and queue non-empty)."""
@@ -517,6 +570,7 @@ class StateMachine:
         log.error("Backend error [%s]: %s", code, message)
         self._display.render_error(f"{code}: {message}")
         self._playback.stop()
+        self._conversation_mode = False
         self._set_state(State.IDLE)
 
     def _on_interrupt_ack(self):
@@ -538,6 +592,7 @@ class StateMachine:
             return  # already in offline mode
         self._ensure_mic_off()
         self._playback.stop()
+        self._conversation_mode = False
         self._offline = True
         self._set_state(State.OFFLINE)
         # Start offline game engine
@@ -704,7 +759,8 @@ class StateMachine:
             self._sfx.unduck()
 
         # Return to IDLE when emotion animation completes or after 3s timeout
-        if state == State.EMOTION:
+        # (In conversation mode, _finish_turn_after_playback handles EMOTION→IDLE transition)
+        if state == State.EMOTION and not self._conversation_mode:
             # Eating: play eating anim for ~3s, then switch to happy for remainder
             if self._current_emotion == "eating" and self._emotion_tick >= 90:
                 self._current_emotion = "happy"

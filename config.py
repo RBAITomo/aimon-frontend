@@ -185,6 +185,12 @@ OFFLINE_DB_PATH = TURN_DB_PATH  # reuse same DB
 WS_RECONNECT_INITIAL_S = 2
 WS_RECONNECT_BACKOFF_CAP_S = 60
 
+# --- VAD (Voice Activity Detection) ---
+VAD_AGGRESSIVENESS = 2          # 0-3, higher = more aggressive filtering
+VAD_SILENCE_THRESHOLD_MS = 2000 # 2s silence triggers stop
+VAD_MIN_SPEECH_MS = 500         # ignore < 0.5s speech
+VAD_MAX_LISTEN_MS = 30000       # 30s max recording (also serves as conversation idle timeout)
+
 # --- Battery Monitor (Waveshare UPS HAT C / INA219 at 0x43) ---
 BATTERY_MONITOR_ENABLED = True
 BATTERY_MONITOR_INTERVAL_S = 60  # poll interval in seconds
