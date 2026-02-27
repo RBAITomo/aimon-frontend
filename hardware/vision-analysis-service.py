@@ -1,9 +1,10 @@
-"""Vision analysis service calling Gemini API directly from Pi.
+"""Vision analysis service calling backend API for food detection.
 
-Uses google-genai SDK to send JPEG images to Gemini 2.5 Flash
-for food detection and scene description.
+Sends JPEG images to the backend's /api/vision/analyze endpoint,
+which routes to Moondream2 sidecar (primary) or cloud fallback.
 """
 
+import io
 import json
 import logging
 import os
@@ -11,27 +12,17 @@ import random
 import re
 import time
 
+import requests
+
 import config
 
 log = logging.getLogger(__name__)
 
-VISION_PROMPT_TEMPLATE = (
-    "Analyze this image taken by a child's AI companion toy.\n"
-    "Rules:\n"
-    '1. If food, respond JSON: {{"is_food": true, "food_name": "<Vietnamese name>", "sprite_key": "<key>", "description": "<brief>"}}\n'
-    '2. If not food, respond JSON: {{"is_food": false, "food_name": null, "sprite_key": null, "description": "<Vietnamese, child-friendly>"}}\n'
-    "3. Keep descriptions under 50 words.\n"
-    "4. Be child-appropriate and positive.\n"
-    "5. Respond ONLY with JSON, no markdown fences.\n"
-    "6. For sprite_key, pick the closest match from this list: [{sprite_keys}]. Use 'default' if none match."
-)
-
 
 class VisionAnalysisService:
-    """Calls Gemini Vision API directly for food detection."""
+    """Calls backend vision API for food detection."""
 
     def __init__(self):
-        self._client = None
         self._available = False
         self._last_call = 0.0
         self._min_interval = config.CAMERA_RATE_LIMIT_S
@@ -39,17 +30,13 @@ class VisionAnalysisService:
         self._initialize()
 
     def _initialize(self):
-        """Initialize google-genai client."""
-        if not config.GEMINI_API_KEY:
-            log.warning("GEMINI_API_KEY not set, vision disabled")
+        """Check backend URL is configured."""
+        if not config.BACKEND_HTTP_URL:
+            log.warning("BACKEND_HTTP_URL not set, vision disabled")
             return
-        try:
-            from google import genai
-            self._client = genai.Client(api_key=config.GEMINI_API_KEY)
-            self._available = True
-            log.info("Vision analysis service initialized (model=%s)", config.GEMINI_MODEL)
-        except Exception as e:
-            log.warning("Vision init failed: %s", e)
+        self._available = config.CAMERA_ENABLED
+        if self._available:
+            log.info("Vision analysis service initialized (backend=%s)", config.BACKEND_HTTP_URL)
 
     def _scan_sprite_keys(self):
         """Scan assets/food/ directory for available sprite filenames (without .png)."""
@@ -89,7 +76,6 @@ class VisionAnalysisService:
     def _compress_image(self, jpeg_bytes, max_dim=512, quality=70):
         """Resize and recompress JPEG to reduce upload size."""
         try:
-            import io
             from PIL import Image
             img = Image.open(io.BytesIO(jpeg_bytes))
             w, h = img.size
@@ -106,8 +92,9 @@ class VisionAnalysisService:
             return jpeg_bytes
 
     def analyze(self, jpeg_bytes):
-        """Analyze JPEG image bytes. Returns dict with is_food, food_name, description.
+        """Analyze JPEG image bytes via backend API.
 
+        Returns dict with is_food, food_name, sprite_key, description.
         Returns None if unavailable, rate-limited, or on error.
         """
         if not self._available:
@@ -121,46 +108,35 @@ class VisionAnalysisService:
         self._last_call = time.time()
 
         try:
-            from google.genai import types
-
-            # Downscale image to reduce upload time from Pi
             jpeg_bytes = self._compress_image(jpeg_bytes)
 
-            prompt = VISION_PROMPT_TEMPLATE.format(
-                sprite_keys=", ".join(self._sprite_keys[:100])
-            )
-
             t0 = time.time()
-            response = self._client.models.generate_content(
-                model=config.GEMINI_MODEL,
-                contents=[
-                    types.Content(
-                        parts=[
-                            types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
-                            types.Part.from_text(text=prompt),
-                        ]
-                    )
-                ],
-                config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_budget=128),
-                ),
+            url = f"{config.BACKEND_HTTP_URL}/api/vision/analyze"
+            resp = requests.post(
+                url,
+                files={"image": ("photo.jpg", jpeg_bytes, "image/jpeg")},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+
+            log.info(
+                "Backend vision API took %.1fs (source=%s, %d bytes sent)",
+                time.time() - t0,
+                result.get("source", "unknown"),
+                len(jpeg_bytes),
             )
 
-            log.info("Gemini API call took %.1fs (%d bytes sent)", time.time() - t0, len(jpeg_bytes))
-            text = response.text.strip()
-            # Strip markdown fences if present
-            if text.startswith("```"):
-                first_nl = text.index("\n")
-                last_fence = text.rfind("```")
-                if first_nl > 0 and last_fence > first_nl:
-                    text = text[first_nl + 1 : last_fence].strip()
-
-            result = json.loads(text)
-            # Validate and set sprite_key
+            # Validate sprite_key locally (backend also validates, but double-check)
             if result.get("is_food"):
                 result["sprite_key"] = self._validate_sprite_key(result.get("sprite_key"))
-            log.info("Vision result: is_food=%s, food=%s, sprite=%s",
-                     result.get("is_food"), result.get("food_name"), result.get("sprite_key"))
+
+            log.info(
+                "Vision result: is_food=%s, food=%s, sprite=%s",
+                result.get("is_food"),
+                result.get("food_name"),
+                result.get("sprite_key"),
+            )
             return result
 
         except Exception as e:

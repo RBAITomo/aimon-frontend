@@ -136,10 +136,9 @@ WIFI_QR_SCAN_TIMEOUT_S = 15
 LED_WIFI_SCAN = (0, 200, 255)  # cyan — QR WiFi scan in progress
 LONG_PRESS_THRESHOLD_MS = 1500  # hold ≥1.5s = long press (WiFi QR in offline)
 
-# --- Gemini Vision (direct from Pi) ---
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-VISION_ENABLED = bool(GEMINI_API_KEY) and CAMERA_ENABLED
+# --- Vision (via backend API) ---
+BACKEND_HTTP_URL = os.getenv("BACKEND_HTTP_URL", "http://localhost:8080")
+VISION_ENABLED = CAMERA_ENABLED
 
 # --- SFX & Audio ---
 SFX_DIR = os.path.join(os.path.dirname(__file__), "audio", "sfx")
