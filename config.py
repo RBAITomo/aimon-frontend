@@ -137,7 +137,7 @@ LED_WIFI_SCAN = (0, 200, 255)  # cyan — QR WiFi scan in progress
 LONG_PRESS_THRESHOLD_MS = 1500  # hold ≥1.5s = long press (WiFi QR in offline)
 
 # --- Vision (via backend API) ---
-BACKEND_HTTP_URL = os.getenv("BACKEND_HTTP_URL", "http://localhost:8080")
+BACKEND_HTTP_URL = os.getenv("BACKEND_HTTP_URL", os.getenv("BACKEND_URL", "http://localhost") + ":8080")
 VISION_ENABLED = CAMERA_ENABLED
 
 # --- SFX & Audio ---
