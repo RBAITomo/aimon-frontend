@@ -21,16 +21,16 @@ AUDIO_PLAYBACK_RATE = 24000  # VieNeu TTS native rate is 24kHz, avoids per-chunk
 AUDIO_DEVICE_NAME = "hw:1,0"  # wm8960 on Whisplay HAT
 
 # --- Display ---
-LCD_WIDTH = 240
-LCD_HEIGHT = 280
+LCD_WIDTH = 280
+LCD_HEIGHT = 240
 LCD_FPS = 30
-LCD_CORNER_HEIGHT = 20  # ST7789 corner offset
+LCD_CORNER_HEIGHT = 20  # ST7789 corner offset (X-axis in landscape)
 SPRITE_DIR = os.path.join(os.path.dirname(__file__), "sprites")
 
-# --- Pet UI Layout (240x280 portrait) ---
+# --- Pet UI Layout (280x240 landscape) ---
 # Top stat bar region
 STAT_BAR_HEIGHT = 24
-STAT_BAR_WIDTH = 52          # reduced from 60 to leave room for battery icon
+STAT_BAR_WIDTH = 60          # wider screen allows more bar width
 STAT_BAR_THICKNESS = 6
 STAT_BAR_Y = 9
 STAT_BAR_GAP = 8
@@ -50,11 +50,11 @@ CONTENT_HEIGHT = CONTENT_Y_END - CONTENT_Y_START
 # Character sprite position (centered in content area)
 CHAR_SPRITE_SIZE = (156, 156)
 CHAR_SPRITE_X = (LCD_WIDTH - 156) // 2
-CHAR_SPRITE_Y = CONTENT_Y_START + 30
+CHAR_SPRITE_Y = CONTENT_Y_START + 10
 
-# Speech bubble (below character)
-BUBBLE_Y = CHAR_SPRITE_Y + 150
-BUBBLE_HEIGHT = 80
+# Speech bubble (below character, shifted right in landscape)
+BUBBLE_Y = CHAR_SPRITE_Y + 130
+BUBBLE_HEIGHT = 60
 BUBBLE_WIDTH = LCD_WIDTH - 20
 BUBBLE_X = 10
 
@@ -85,7 +85,7 @@ STAGE_ASSET_MAP = {
 MOVABLE_STAGES = {"child", "adult"}
 
 # Movement zone (lower half of content area, character wanders within)
-MOVE_ZONE_Y_MIN = CONTENT_Y_START + 10
+MOVE_ZONE_Y_MIN = CONTENT_Y_START + 5
 MOVE_ZONE_Y_MAX = LCD_HEIGHT - CHAR_SPRITE_SIZE[1]  # allow overlap with speech bubble/XP bar
 MOVE_ZONE_X_MIN = 10
 MOVE_ZONE_X_MAX = LCD_WIDTH - CHAR_SPRITE_SIZE[0] - 10
@@ -95,6 +95,10 @@ MOVE_IDLE_MAX_FRAMES = 150  # 5s maximum idle pause
 
 # --- Hardware Pins (BOARD numbering) ---
 PIN_BUTTON = 11
+PIN_BUTTON_A = 29  # extra button A (placeholder)
+PIN_BUTTON_B = 31  # extra button B (placeholder)
+PIN_BUTTON_C = 32  # extra button C (placeholder)
+PIN_BUTTON_D = 33  # extra button D (placeholder)
 PIN_DC = 13
 PIN_RST = 7
 PIN_BACKLIGHT = 15
@@ -126,7 +130,6 @@ LED_OFFLINE = (255, 140, 0)  # amber (offline indicator)
 # --- Camera ---
 CAMERA_ENABLED = os.getenv("CAMERA_ENABLED", "true").lower() == "true"
 CAMERA_RATE_LIMIT_S = 30  # min seconds between captures
-CAMERA_DOUBLE_PRESS_MS = 500  # max ms between presses for double-press detection
 LED_CAMERA = (200, 100, 255)  # purple — camera capture in progress
 
 # --- WiFi Manager ---
@@ -172,6 +175,22 @@ REGRESSION_ANIM_FRAMES = 120  # 4 seconds
 # SFX ducking (volume scale 0.0-1.0)
 SFX_DUCK_VOLUME = 0.3
 SFX_NORMAL_VOLUME = 1.0
+
+# --- Shutdown ---
+SHUTDOWN_HOLD_MS = 5000  # hold main button 5s = enter shutdown warning
+
+# --- Food Inventory ---
+FOOD_INVENTORY_MAX = 20
+FOOD_INVENTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "food-inventory.json")
+
+# --- Menu Overlay ---
+MENU_OVERLAY_ALPHA = 180
+MENU_LABEL_FONT_SIZE = 24
+MENU_ITEM_NAMES = ["Trang thai", "Kho do an", "Huy hieu", "Ban do"]
+
+# --- Quest ---
+QUEST_TRIGGER_COOLDOWN_S = 5
+LED_QUEST = (100, 255, 100)  # green pulse for quest trigger
 
 # --- Offline Gameplay ---
 OFFLINE_EVENT_MAX = 1000

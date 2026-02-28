@@ -154,6 +154,10 @@ class WSClient:
         """Confirm feeding after food detection (food analyzed on Pi)."""
         self._send_json({"type": "pet_feed_confirm", "food_name": food_name, "sprite_key": sprite_key})
 
+    def send_quest_trigger(self):
+        """Request a new quest from backend."""
+        self._send_json({"type": "quest_trigger"})
+
     def send_offline_sync(self, events: list, state_snapshot: dict):
         """Send offline events and state snapshot for backend sync."""
         self._send_json({

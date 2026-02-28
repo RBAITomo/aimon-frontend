@@ -60,6 +60,12 @@ WifiManager = _wifi_mod.WifiManager
 _battery_mod = importlib.import_module("hardware.battery-monitor")
 BatteryMonitor = _battery_mod.BatteryMonitor
 
+_food_inv_mod = importlib.import_module("state.food-inventory-manager")
+FoodInventoryManager = _food_inv_mod.FoodInventoryManager
+
+_menu_ctrl_mod = importlib.import_module("state.menu-overlay-controller")
+MenuOverlayController = _menu_ctrl_mod.MenuOverlayController
+
 
 class State(enum.Enum):
     IDLE = "idle"
@@ -111,13 +117,17 @@ class StateMachine:
         self._pet_state = PetState()
         self._pet_lock = threading.Lock()
 
-        # Camera: double-press detection (guarded by _press_lock)
+        # Button press timing (guarded by _press_lock)
         self._camera = None
-        self._last_press_time = 0.0
-        self._press_pending = False  # True = waiting to see if double-press
-        self._press_timer = None
         self._press_start_time = 0.0  # for long-press detection
         self._press_lock = threading.Lock()
+
+        # Shutdown flow: warning → 5s countdown → confirm/cancel
+        self._shutdown_pending = False
+        self._shutdown_deadline = 0.0
+
+        # Quest trigger cooldown
+        self._last_quest_trigger = 0.0
         self._vision = None
         self._wifi_manager = WifiManager(config.WIFI_PROFILES_PATH)
         if config.CAMERA_ENABLED:
@@ -143,6 +153,12 @@ class StateMachine:
             self._pet_state, self._pet_lock, self._display,
             self._sfx, self._badge_popup, self._food_mgr, self._ws,
         )
+
+        # Food inventory (persistent JSON storage)
+        self._food_inventory = FoodInventoryManager()
+
+        # Menu overlay controller
+        self._menu = MenuOverlayController()
 
         # Offline gameplay components
         self._offline_journal = OfflineEventJournal()
@@ -173,6 +189,15 @@ class StateMachine:
     def _register_callbacks(self):
         self._hat.on_button_press(self._on_button_press)
         self._hat.on_button_release(self._on_button_release)
+        # Extra buttons A-D: placeholder callbacks (log only)
+        self._hat.on_button_a_press(self._on_button_a_press)
+        self._hat.on_button_a_release(self._on_button_a_release)
+        self._hat.on_button_b_press(self._on_button_b_press)
+        self._hat.on_button_b_release(self._on_button_b_release)
+        self._hat.on_button_c_press(self._on_button_c_press)
+        self._hat.on_button_c_release(self._on_button_c_release)
+        self._hat.on_button_d_press(self._on_button_d_press)
+        self._hat.on_button_d_release(self._on_button_d_release)
         self._ws.on_hello_ack = self._on_hello_ack
         self._ws.on_asr_result = self._on_asr_result
         self._ws.on_llm_stream = self._on_llm_stream
@@ -232,69 +257,52 @@ class StateMachine:
             self._capture.stop()
 
     def _on_button_press(self):
-        self._notify_activity()  # any button press resets backlight dim timer
+        """Main button press: shutdown confirm, evolution exit, or record press start time."""
+        self._notify_activity()
+        # During shutdown countdown: main press = confirm shutdown
+        if self._shutdown_pending:
+            self._confirm_shutdown()
+            return
         with self._press_lock:
             self._press_start_time = time.time()
 
+        # Evolution: button dismisses hold phase
+        if self._state == State.EVOLUTION and self._evolution_holding:
+            self._pet_handler.end_evolution()
+            self._display.clear_black_background()
+            self._set_state(State.IDLE)
+            return
         if self._state == State.EVOLUTION:
-            if self._evolution_holding:
-                # Exit evolution: restore background and go idle
-                self._pet_handler.end_evolution()
-                self._display.clear_black_background()
-                self._set_state(State.IDLE)
-            # During flash phase, ignore button (don't cut the animation short)
             return
 
-        if self._state == State.ANSWER:
-            self._interrupt()
-            self._conversation_mode = False
-            return
+    # --- Shutdown flow ---
 
-        # Button during LISTENING in conversation mode: stop & send, exit conversation
-        if self._state == State.LISTENING:
-            self._conversation_mode = False
-            self._stop_listening()
-            return
+    def _enter_shutdown_warning(self):
+        """Long press detected: show warning, start 5s countdown."""
+        log.warning("Shutdown warning triggered")
+        self._shutdown_pending = True
+        self._shutdown_deadline = time.time() + 5.0
+        self._hat.set_rgb(255, 0, 0)
+        self._last_bubble_text = "Tat may? Nhan lai de xac nhan. A de huy. (5s)"
 
-        if self._state != State.IDLE:
-            return
+    def _confirm_shutdown(self):
+        """Main button pressed again during countdown = immediate shutdown."""
+        log.warning("Shutdown confirmed by user")
+        self._display.render_shutdown_screen()
+        import subprocess
+        subprocess.Popen(["sudo", "shutdown", "-h", "now"])
 
-        with self._press_lock:
-            now = time.time()
-            elapsed_ms = (now - self._last_press_time) * 1000
-            self._last_press_time = now
+    def _cancel_shutdown(self):
+        """Button A pressed during countdown = cancel."""
+        log.info("Shutdown cancelled")
+        self._shutdown_pending = False
+        self._hat.set_rgb_tuple(self._LED_MAP.get(self._state, config.LED_IDLE))
+        self._last_bubble_text = "Da huy tat may."
 
-            # Double-press detected
-            if self._press_pending and elapsed_ms < config.CAMERA_DOUBLE_PRESS_MS:
-                self._press_pending = False
-                if self._press_timer:
-                    self._press_timer.cancel()
-                    self._press_timer = None
-                if self._offline and self._offline_engine:
-                    self._offline_engine.on_feed()
-                    self._sfx.play("eat")
-                else:
-                    self._trigger_camera()
-                return
-
-            # First press -> wait to see if double-press follows
-            self._press_pending = True
-            delay_s = config.CAMERA_DOUBLE_PRESS_MS / 1000.0
-            self._press_timer = threading.Timer(delay_s, self._on_single_press_confirmed)
-            self._press_timer.daemon = True
-            self._press_timer.start()
-
-    def _on_single_press_confirmed(self):
-        """Called after double-press window expires -> treat as single press (talk)."""
-        with self._press_lock:
-            self._press_pending = False
-            self._press_timer = None
-        if self._state in (State.IDLE, State.OFFLINE):
-            if self._offline and self._offline_engine:
-                self._offline_engine.on_interaction()
-            elif not self._offline:
-                self._conversation_mode = True
-                self._start_listening()
+    def _check_shutdown_countdown(self):
+        """Called in main loop tick: auto-shutdown if deadline passed."""
+        if self._shutdown_pending and time.time() >= self._shutdown_deadline:
+            self._confirm_shutdown()
 
     def _trigger_camera(self):
         """Capture photo and analyze directly via Gemini on Pi."""
@@ -327,19 +335,11 @@ class StateMachine:
                     sprite_key = result.get("sprite_key", "default")
                     log.info("Food detected: %s (sprite=%s)", food, sprite_key)
 
-                    with self._pet_lock:
-                        hunger = self._pet_state.hunger
-
-                    if hunger > 0:
-                        # Pet is hungry — eat immediately
-                        self._food_mgr.add(sprite_key, food, eat_immediately=True)
-                        self._last_bubble_text = food + " ngon quá! Cho mình ăn nhé?"
-                        self._ws.send_feed_confirm(food, sprite_key)
-                        self._sfx.play("eat")
-                    else:
-                        # Pet is full — store food on screen
-                        self._food_mgr.add(sprite_key, food, eat_immediately=False)
-                        self._last_bubble_text = "Mình no rồi! Để dành ăn sau nhé~"
+                    # Store in inventory instead of immediate feed
+                    self._food_inventory.add(food, sprite_key)
+                    self._food_mgr.add(sprite_key, food, eat_immediately=False)
+                    self._last_bubble_text = f"{food} - da luu vao kho!"
+                    self._sfx.play("collect")
                 else:
                     desc = result.get("description", "")
                     log.info("Non-food: %s", desc)
@@ -412,20 +412,130 @@ class StateMachine:
 
         threading.Thread(target=_scan_loop, daemon=True).start()
 
+    # --- Button release (main) ---
+
     def _on_button_release(self):
-        # Long-press detection: WiFi QR scan (offline only)
-        is_long = False
-        if self._offline:
-            with self._press_lock:
-                hold_ms = (time.time() - self._press_start_time) * 1000
-                if self._press_start_time > 0 and hold_ms >= config.LONG_PRESS_THRESHOLD_MS:
-                    is_long = True
-                    self._press_pending = False
-                    if self._press_timer:
-                        self._press_timer.cancel()
-                        self._press_timer = None
-        if is_long:
+        if self._shutdown_pending:
+            return  # confirm handled by _on_button_press
+        with self._press_lock:
+            hold_ms = (time.time() - self._press_start_time) * 1000
+        # Long press: enter shutdown warning + 5s countdown
+        if hold_ms >= config.SHUTDOWN_HOLD_MS:
+            self._enter_shutdown_warning()
+            return
+        # Offline: long press = WiFi QR (keep existing threshold)
+        if self._offline and hold_ms >= config.LONG_PRESS_THRESHOLD_MS:
             self._trigger_wifi_qr_scan()
+            return
+        # Normal press: toggle menu overlay
+        self._toggle_menu()
+
+    def _toggle_menu(self):
+        """Toggle menu overlay on/off."""
+        self._menu.toggle()
+
+    # --- Button A: Talk (conversation toggle) ---
+
+    def _on_button_a_press(self):
+        self._notify_activity()
+        if self._menu.is_open:
+            self._menu.next_item()
+            return
+        # Shutdown pending: A = cancel
+        if self._shutdown_pending:
+            self._cancel_shutdown()
+            return
+        if self._state == State.ANSWER:
+            self._interrupt()
+            self._conversation_mode = False
+            return
+        if self._state == State.LISTENING:
+            self._conversation_mode = False
+            self._stop_listening()
+            return
+        if self._state == State.IDLE and not self._offline:
+            self._conversation_mode = True
+            self._start_listening()
+        elif self._offline and self._offline_engine:
+            self._offline_engine.on_interaction()
+
+    def _on_button_a_release(self):
+        pass
+
+    # --- Button B: Camera capture ---
+
+    def _on_button_b_press(self):
+        self._notify_activity()
+        if self._menu.is_open:
+            self._menu.enter()
+            return
+        if self._state != State.IDLE:
+            return
+        if self._offline and self._offline_engine:
+            self._offline_engine.on_feed()
+            self._sfx.play("eat")
+        else:
+            self._trigger_camera()
+
+    def _on_button_b_release(self):
+        pass
+
+    # --- Button C: Quick-feed from inventory ---
+
+    def _on_button_c_press(self):
+        self._notify_activity()
+        if self._menu.is_open:
+            self._menu.back()
+            return
+        if self._state != State.IDLE:
+            return
+        self._quick_feed_from_inventory()
+
+    def _on_button_c_release(self):
+        pass
+
+    # --- Button D: Quest trigger / menu prev ---
+
+    def _on_button_d_press(self):
+        self._notify_activity()
+        if self._menu.is_open:
+            self._menu.prev_item()
+            return
+        if self._state != State.IDLE or self._offline:
+            return
+        # Check cooldown
+        now = time.time()
+        if now - self._last_quest_trigger < config.QUEST_TRIGGER_COOLDOWN_S:
+            return
+        # Check active quest
+        if self._pet_handler.quest_text:
+            self._last_bubble_text = "Quest dang chay!"
+            return
+        self._last_quest_trigger = now
+        self._hat.set_rgb_tuple(config.LED_QUEST)
+        self._last_bubble_text = "Dang tim quest..."
+        self._ws.send_quest_trigger()
+        # Reset LED after brief flash
+        def _reset_led():
+            time.sleep(0.5)
+            self._hat.set_rgb_tuple(self._LED_MAP.get(self._state, config.LED_IDLE))
+        threading.Thread(target=_reset_led, daemon=True).start()
+
+    def _on_button_d_release(self):
+        pass
+
+    # --- Quick-feed from inventory (Phase 03) ---
+
+    def _quick_feed_from_inventory(self):
+        """Pop oldest food from inventory and feed to pet."""
+        item = self._food_inventory.pop()
+        if not item:
+            self._last_bubble_text = "Kho trong, chup anh de them do an!"
+            return
+        self._food_mgr.add(item["sprite_key"], item["food_name"], eat_immediately=True)
+        self._ws.send_feed_confirm(item["food_name"], item["sprite_key"])
+        self._sfx.play("eat")
+        self._last_bubble_text = f"Cho an {item['food_name']}!"
 
     def _start_listening(self):
         self._set_state(State.LISTENING)
@@ -673,6 +783,8 @@ class StateMachine:
     def tick(self):
         """Called once per frame (adaptive FPS). Updates display for current state."""
         self._tick += 1
+        # Shutdown countdown check
+        self._check_shutdown_countdown()
         # Backlight dim / standby check every ~1s
         if self._tick % 10 == 0:
             self._check_backlight_dim()
@@ -750,7 +862,10 @@ class StateMachine:
         # Advance food sprite tweens
         self._food_mgr.tick()
 
-        done = self._display.render(render_tick, pet_snapshot, text, self._badge_popup, self._food_mgr)
+        done = self._display.render(
+            render_tick, pet_snapshot, text, self._badge_popup, self._food_mgr,
+            menu=self._menu, food_inventory=self._food_inventory,
+        )
 
         # SFX ducking: reduce SFX volume during TTS playback
         if self._playback.is_playing():

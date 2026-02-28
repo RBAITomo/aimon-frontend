@@ -19,6 +19,9 @@ log = logging.getLogger(__name__)
 _compositor_mod = importlib.import_module("display.layer-compositor")
 LayerCompositor = _compositor_mod.LayerCompositor
 
+_menu_renderer_mod = importlib.import_module("display.menu-overlay-renderer")
+MenuOverlayRenderer = _menu_renderer_mod.MenuOverlayRenderer
+
 # Colors for non-compositor screens
 _COL_BG = (10, 10, 20)
 _COL_DIM = (100, 100, 120)
@@ -38,12 +41,13 @@ class DisplayEngine:
             (config.LCD_WIDTH, config.LCD_HEIGHT), depth=24
         )
         self._compositor = LayerCompositor()
+        self._menu_renderer = MenuOverlayRenderer()
         self._font_large = pygame.font.SysFont("dejavusans", 22)
         self._font_small = pygame.font.SysFont("dejavusans", 16)
 
         log.info("DisplayEngine initialized (%dx%d)", config.LCD_WIDTH, config.LCD_HEIGHT)
 
-    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None):
+    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None, menu=None, food_inventory=None):
         """Main render call — delegates to compositor.
 
         Args:
@@ -52,6 +56,8 @@ class DisplayEngine:
             text: Optional speech bubble text.
             badge_popup: Optional BadgePopupRenderer to overlay on top.
             food_mgr: Optional FoodSpriteManager to render food sprites.
+            menu: Optional MenuOverlayController for menu rendering.
+            food_inventory: Optional FoodInventoryManager for inventory screen.
 
         Returns:
             bool: True if current animation finished.
@@ -63,6 +69,8 @@ class DisplayEngine:
             food_mgr.render(self._surface)
         if badge_popup:
             badge_popup.render(self._surface, tick)
+        if menu and menu.is_open:
+            self._menu_renderer.render(self._surface, menu, pet_state=pet_state, food_inventory=food_inventory)
         self._blit_to_lcd()
         return done
 
@@ -148,6 +156,12 @@ class DisplayEngine:
     def invalidate(self):
         """Force full redraw on next render (e.g. after standby black screen)."""
         self._compositor.mark_dirty()
+
+    def render_shutdown_screen(self):
+        """Render shutdown confirmation screen."""
+        self._surface.fill((40, 0, 0))
+        self._draw_centered_text("Dang tat may...", self._font_large, (255, 100, 100), y=config.LCD_HEIGHT // 2 - 10)
+        self._blit_to_lcd()
 
     def _draw_centered_text(self, text, font, color, y):
         """Draw horizontally centered text at given y position."""
