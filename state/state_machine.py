@@ -125,6 +125,7 @@ class StateMachine:
         # Shutdown flow: warning → 5s countdown → confirm/cancel
         self._shutdown_pending = False
         self._shutdown_deadline = 0.0
+        self._shutdown_warning_time = 0.0  # debounce against GPIO bounce
 
         # Quest trigger cooldown
         self._last_quest_trigger = 0.0
@@ -260,8 +261,10 @@ class StateMachine:
         """Main button press: shutdown confirm, evolution exit, or record press start time."""
         self._notify_activity()
         # During shutdown countdown: main press = confirm shutdown
+        # Debounce: ignore presses within 500ms of warning (GPIO bounce on release)
         if self._shutdown_pending:
-            self._confirm_shutdown()
+            if time.time() - self._shutdown_warning_time >= 0.5:
+                self._confirm_shutdown()
             return
         with self._press_lock:
             self._press_start_time = time.time()
@@ -281,7 +284,9 @@ class StateMachine:
         """Long press detected: show warning, start 5s countdown."""
         log.warning("Shutdown warning triggered")
         self._shutdown_pending = True
-        self._shutdown_deadline = time.time() + 5.0
+        now = time.time()
+        self._shutdown_deadline = now + 5.0
+        self._shutdown_warning_time = now
         self._hat.set_rgb(255, 0, 0)
         self._last_bubble_text = "Tat may? Nhan lai de xac nhan. A de huy. (5s)"
 
@@ -315,7 +320,7 @@ class StateMachine:
             return
 
         self._hat.set_rgb_tuple(config.LED_CAMERA)
-        log.info("Camera capture triggered (double-press)")
+        log.info("Camera capture triggered (Button B)")
 
         def _capture_and_analyze():
             try:
@@ -433,11 +438,13 @@ class StateMachine:
     def _toggle_menu(self):
         """Toggle menu overlay on/off."""
         self._menu.toggle()
+        log.info("Menu toggled: is_open=%s", self._menu.is_open)
 
     # --- Button A: Talk (conversation toggle) ---
 
     def _on_button_a_press(self):
         self._notify_activity()
+        log.info("Button A pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
         if self._menu.is_open:
             self._menu.next_item()
             return
@@ -466,6 +473,7 @@ class StateMachine:
 
     def _on_button_b_press(self):
         self._notify_activity()
+        log.info("Button B pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
         if self._menu.is_open:
             self._menu.enter()
             return
@@ -484,6 +492,7 @@ class StateMachine:
 
     def _on_button_c_press(self):
         self._notify_activity()
+        log.info("Button C pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
         if self._menu.is_open:
             self._menu.back()
             return
@@ -498,6 +507,7 @@ class StateMachine:
 
     def _on_button_d_press(self):
         self._notify_activity()
+        log.info("Button D pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
         if self._menu.is_open:
             self._menu.prev_item()
             return
