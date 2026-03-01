@@ -119,7 +119,7 @@ class StateMachine:
 
         # Button press timing (guarded by _press_lock)
         self._camera = None
-        self._press_start_time = time.time()  # for long-press detection
+        self._press_start_time = None  # for long-press detection (None = no press active)
         self._press_lock = threading.Lock()
 
         # Shutdown flow: warning → 5s countdown → confirm/cancel
@@ -423,8 +423,11 @@ class StateMachine:
         if self._shutdown_pending:
             return  # confirm handled by _on_button_press
         with self._press_lock:
+            if self._press_start_time is None:
+                return  # release without matching press — ignore
             hold_ms = (time.time() - self._press_start_time) * 1000
-            self._press_start_time = time.time()  # reset to prevent stale long-press
+            self._press_start_time = None  # consumed — require new press
+        log.debug("Main button released after %.0f ms", hold_ms)
         # Long press: enter shutdown warning + 5s countdown
         if hold_ms >= config.SHUTDOWN_HOLD_MS:
             self._enter_shutdown_warning()
