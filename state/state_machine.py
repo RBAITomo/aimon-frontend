@@ -404,7 +404,12 @@ class StateMachine:
                 else:
                     desc = result.get("description", "")
                     log.info("Non-food: %s", desc)
-                    self._last_bubble_text = desc
+                    if desc and not self._offline:
+                        self._last_bubble_text = f"Thấy: {desc}"
+                        self._ws.send_vision_describe(desc)
+                        self._set_state(State.ANSWER)
+                    else:
+                        self._last_bubble_text = desc or "Mình không nhận ra đây là gì!"
             finally:
                 self._hat.set_rgb_tuple(config.LED_IDLE)
 

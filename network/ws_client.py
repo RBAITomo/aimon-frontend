@@ -158,6 +158,10 @@ class WSClient:
         """Request a new quest from backend."""
         self._send_json({"type": "quest_request"})
 
+    def send_vision_describe(self, description: str):
+        """Send non-food vision description to LLM for a conversational response."""
+        self._send_json({"type": "vision_describe", "description": description})
+
     def send_offline_sync(self, events: list, state_snapshot: dict):
         """Send offline events and state snapshot for backend sync."""
         self._send_json({
