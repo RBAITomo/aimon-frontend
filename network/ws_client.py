@@ -156,7 +156,7 @@ class WSClient:
 
     def send_quest_trigger(self):
         """Request a new quest from backend."""
-        self._send_json({"type": "quest_trigger"})
+        self._send_json({"type": "quest_request"})
 
     def send_offline_sync(self, events: list, state_snapshot: dict):
         """Send offline events and state snapshot for backend sync."""
