@@ -316,7 +316,12 @@ class WhisplayHAT:
             self._poll_stop.wait(0.02)
 
     def _button_event(self, channel):
-        """Dispatch press/release based on GPIO level for any button."""
+        """Dispatch press/release based on GPIO level for any button.
+
+        A small delay before reading lets contact bounce settle so the
+        level matches the actual physical state, not a transient spike.
+        """
+        time.sleep(0.005)  # 5 ms settle time
         suffix = ""
         for pin, s in self._BUTTON_CONFIGS:
             if pin == channel:

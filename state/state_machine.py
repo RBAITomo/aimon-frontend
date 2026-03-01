@@ -428,6 +428,10 @@ class StateMachine:
             hold_ms = (time.time() - self._press_start_time) * 1000
             self._press_start_time = None  # consumed — require new press
         log.debug("Main button released after %.0f ms", hold_ms)
+        # Sanity check: reject impossibly long holds (stale timestamp from GPIO bounce)
+        if hold_ms > config.SHUTDOWN_HOLD_MS * 3:
+            log.warning("Ignoring spurious hold_ms=%.0f (likely GPIO bounce)", hold_ms)
+            return
         # Long press: enter shutdown warning + 5s countdown
         if hold_ms >= config.SHUTDOWN_HOLD_MS:
             self._enter_shutdown_warning()
