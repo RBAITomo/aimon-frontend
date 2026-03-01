@@ -119,8 +119,9 @@ class StateMachine:
 
         # Main button tap tracking (limit switch: each physical press = one edge)
         self._camera = None
-        self._tap_times = []  # timestamps of recent taps
+        self._tap_count = 0
         self._tap_lock = threading.Lock()
+        self._tap_timer = None  # pending Timer for tap resolution
         self._last_tap_time = 0.0  # debounce: ignore edges within this window
 
         # Shutdown flow: warning → 5s countdown → confirm/cancel
@@ -293,36 +294,40 @@ class StateMachine:
         if self._state == State.EVOLUTION:
             return
 
-        # Track taps for shutdown detection (3 taps within 2s)
+        # Track taps: cancel previous timer, increment count, start new timer
         with self._tap_lock:
-            self._tap_times = [t for t in self._tap_times if now - t < 2.0]
-            self._tap_times.append(now)
-            tap_count = len(self._tap_times)
+            self._tap_count += 1
+            if self._tap_timer is not None:
+                self._tap_timer.cancel()
+            count_snapshot = self._tap_count
+            # After 500ms of no new taps, resolve the tap sequence
+            self._tap_timer = threading.Timer(0.5, self._resolve_taps, args=[count_snapshot])
+            self._tap_timer.daemon = True
+            self._tap_timer.start()
 
-        if tap_count >= 3:
+        # Immediate triple-tap: don't wait for timer
+        if count_snapshot >= 3:
             with self._tap_lock:
-                self._tap_times.clear()
+                self._tap_timer.cancel()
+                self._tap_count = 0
+                self._tap_timer = None
             self._enter_shutdown_warning()
-            return
 
-        # Single/double tap: normal action (menu toggle)
-        # Delay briefly to allow multi-tap detection
-        def _delayed_action():
-            time.sleep(0.35)  # wait for possible follow-up taps
-            with self._tap_lock:
-                # If more taps arrived, a multi-tap handler will deal with it
-                recent = [t for t in self._tap_times if now - t < 0.1]
-                if recent:
-                    return  # newer tap pending, skip this action
-            # Offline long: WiFi QR on double-tap
-            if self._offline:
-                with self._tap_lock:
-                    if tap_count >= 2:
-                        self._trigger_wifi_qr_scan()
-                        return
+    def _resolve_taps(self, count):
+        """Called 500ms after the last tap — execute action based on tap count."""
+        with self._tap_lock:
+            # Stale timer: more taps arrived since this timer was scheduled
+            if self._tap_count != count:
+                return
+            self._tap_count = 0
+            self._tap_timer = None
+        log.debug("Tap sequence resolved: %d tap(s)", count)
+        if count >= 3:
+            self._enter_shutdown_warning()
+        elif count == 2 and self._offline:
+            self._trigger_wifi_qr_scan()
+        else:
             self._toggle_menu()
-
-        threading.Thread(target=_delayed_action, daemon=True).start()
 
     # --- Shutdown flow ---
 
