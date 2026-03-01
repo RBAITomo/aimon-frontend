@@ -88,9 +88,10 @@ class FoodSpriteManager:
             state = "tweening"
         else:
             slot = -1
-            # Center above the pet character
-            sx = config.CHAR_SPRITE_X + config.CHAR_SPRITE_SIZE[0] // 2 - config.FOOD_SPRITE_SIZE // 2
-            sy = config.CHAR_SPRITE_Y - config.FOOD_SPRITE_SIZE - 5
+            # Center on screen for prominent popup
+            popup_size = config.FOOD_POPUP_SPRITE_SIZE
+            sx = (config.LCD_WIDTH - popup_size) // 2
+            sy = (config.LCD_HEIGHT - popup_size) // 2
             state = "popup"
 
         item = FoodItem(
@@ -170,23 +171,30 @@ class FoodSpriteManager:
 
                 if item.state == "popup":
                     # Pop-in: scale from 0.3 to 1.0 over first 8 frames, then hold
+                    # Uses larger popup sprite size, centered on screen
+                    popup_size = config.FOOD_POPUP_SPRITE_SIZE
                     pop_t = min(item.popup_tick / 8, 1.0)
                     scale = 0.3 + 0.7 * pop_t
-                    size = int(config.FOOD_SPRITE_SIZE * scale)
+                    size = int(popup_size * scale)
                     if size < 2:
                         continue
+                    # Re-scale from original cached sprite for quality
                     scaled = pygame.transform.smoothscale(item.surface, (size, size))
-                    # Center the scaled sprite at the item position
-                    offset = (config.FOOD_SPRITE_SIZE - size) // 2
-                    surface.blit(scaled, (int(item.x) + offset, int(item.y) + offset))
+                    # Center the scaled sprite at screen center
+                    cx = (config.LCD_WIDTH - size) // 2
+                    cy = (config.LCD_HEIGHT - size) // 2
+                    surface.blit(scaled, (cx, cy))
 
                 elif item.state == "fadeout":
-                    # Fade out via alpha
+                    # Fade out via alpha, centered on screen
+                    popup_size = config.FOOD_POPUP_SPRITE_SIZE
                     t = min(item.popup_tick / config.FOOD_FADEOUT_FRAMES, 1.0)
                     alpha = int(255 * (1.0 - t))
-                    faded = item.surface.copy()
-                    faded.set_alpha(alpha)
-                    surface.blit(faded, (int(item.x), int(item.y)))
+                    scaled = pygame.transform.smoothscale(item.surface, (popup_size, popup_size))
+                    scaled.set_alpha(alpha)
+                    cx = (config.LCD_WIDTH - popup_size) // 2
+                    cy = (config.LCD_HEIGHT - popup_size) // 2
+                    surface.blit(scaled, (cx, cy))
 
                 elif item.state == "tweening" and config.FOOD_TWEEN_FRAMES > 0:
                     t = min(item.tween_tick / config.FOOD_TWEEN_FRAMES, 1.0)
