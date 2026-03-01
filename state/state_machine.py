@@ -572,10 +572,9 @@ class StateMachine:
         now = time.time()
         if now - self._last_quest_trigger < config.QUEST_TRIGGER_COOLDOWN_S:
             return
-        # Check active quest
+        # Clear active quest so new one replaces it
         if self._pet_handler.quest_text:
-            self._last_bubble_text = "Quest dang chay!"
-            return
+            self._pet_handler.clear_quest()
         self._last_quest_trigger = now
         self._hat.set_rgb_tuple(config.LED_QUEST)
         self._last_bubble_text = "Dang tim quest..."
