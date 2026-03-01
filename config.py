@@ -165,6 +165,8 @@ FOOD_SLOT_POSITIONS = [
 ]
 # Pet center target for tween animation
 FOOD_PET_CENTER = (CHAR_SPRITE_X + CHAR_SPRITE_SIZE[0] // 2, CHAR_SPRITE_Y + CHAR_SPRITE_SIZE[1] // 2)
+FOOD_POPUP_FRAMES = 60    # ~2s at 30 FPS: sprite visible
+FOOD_FADEOUT_FRAMES = 15  # ~0.5s fade out
 
 # Animation durations (frames at 30 FPS)
 EVOLUTION_ANIM_FRAMES = 90    # 3 seconds
