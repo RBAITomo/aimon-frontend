@@ -288,7 +288,7 @@ class StateMachine:
         self._shutdown_deadline = now + 5.0
         self._shutdown_warning_time = now
         self._hat.set_rgb(255, 0, 0)
-        self._last_bubble_text = "Tat may? Nhan lai de xac nhan. A de huy. (5s)"
+        self._last_bubble_text = "Tắt máy? nhấn thêm lần nữa để tắt, bấm A để hủy bỏ."
 
     def _confirm_shutdown(self):
         """Main button pressed again during countdown = immediate shutdown."""
@@ -302,7 +302,7 @@ class StateMachine:
         log.info("Shutdown cancelled")
         self._shutdown_pending = False
         self._hat.set_rgb_tuple(self._LED_MAP.get(self._state, config.LED_IDLE))
-        self._last_bubble_text = "Da huy tat may."
+        self._last_bubble_text = "Đã hủy tắt máy."
 
     def _check_shutdown_countdown(self):
         """Called in main loop tick: auto-shutdown if deadline passed."""
@@ -343,7 +343,7 @@ class StateMachine:
                     # Store in inventory instead of immediate feed
                     self._food_inventory.add(food, sprite_key)
                     self._food_mgr.add(sprite_key, food, eat_immediately=False)
-                    self._last_bubble_text = f"{food} - da luu vao kho!"
+                    self._last_bubble_text = f"{food} - đã lưu vào kho!"
                     self._sfx.play("collect")
                 else:
                     desc = result.get("description", "")
