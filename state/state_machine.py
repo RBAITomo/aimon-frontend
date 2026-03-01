@@ -57,6 +57,9 @@ OfflineGameEngine = _engine_mod.OfflineGameEngine
 _wifi_mod = importlib.import_module("hardware.wifi-manager")
 WifiManager = _wifi_mod.WifiManager
 
+_vol_mod = importlib.import_module("audio.volume-control")
+VolumeControl = _vol_mod.VolumeControl
+
 _battery_mod = importlib.import_module("hardware.battery-monitor")
 BatteryMonitor = _battery_mod.BatteryMonitor
 
@@ -65,6 +68,7 @@ FoodInventoryManager = _food_inv_mod.FoodInventoryManager
 
 _menu_ctrl_mod = importlib.import_module("state.menu-overlay-controller")
 MenuOverlayController = _menu_ctrl_mod.MenuOverlayController
+MenuItem = _menu_ctrl_mod.MenuItem
 
 
 class State(enum.Enum):
@@ -162,6 +166,7 @@ class StateMachine:
 
         # Menu overlay controller
         self._menu = MenuOverlayController()
+        self._volume = VolumeControl()
 
         # Offline gameplay components
         self._offline_journal = OfflineEventJournal()
@@ -485,7 +490,10 @@ class StateMachine:
         self._notify_activity()
         log.info("Button A pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
         if self._menu.is_open:
-            self._menu.next_item()
+            if self._menu.in_screen and self._menu.current_item == MenuItem.VOLUME:
+                self._volume.increase()
+            else:
+                self._menu.next_item()
             return
         # Shutdown pending: A = cancel
         if self._shutdown_pending:
@@ -548,7 +556,10 @@ class StateMachine:
         self._notify_activity()
         log.info("Button D pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
         if self._menu.is_open:
-            self._menu.prev_item()
+            if self._menu.in_screen and self._menu.current_item == MenuItem.VOLUME:
+                self._volume.decrease()
+            else:
+                self._menu.prev_item()
             return
         if self._state != State.IDLE or self._offline:
             return
@@ -914,6 +925,7 @@ class StateMachine:
         done = self._display.render(
             render_tick, pet_snapshot, text, self._badge_popup, self._food_mgr,
             menu=self._menu, food_inventory=self._food_inventory,
+            volume_pct=self._volume.volume,
         )
 
         # SFX ducking: reduce SFX volume during TTS playback

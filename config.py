@@ -186,7 +186,13 @@ FOOD_INVENTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "food-inve
 # --- Menu Overlay ---
 MENU_OVERLAY_ALPHA = 180
 MENU_LABEL_FONT_SIZE = 24
-MENU_ITEM_NAMES = ["Trang thai", "Kho do an", "Huy hieu", "Ban do"]
+MENU_ITEM_NAMES = ["Trạng Thái", "Kho Đồ Ăn", "Huy hiệu", "Bản đồ", "Âm lượng"]
+
+# --- Volume ---
+VOLUME_DEFAULT = 80   # percent (0-100)
+VOLUME_STEP = 10      # percent per A/D press
+VOLUME_AMIXER_CARD = 1  # wm8960 soundcard
+VOLUME_AMIXER_CONTROLS = ["Headphone", "Speaker", "Speaker AC", "Speaker DC"]
 
 # --- Quest ---
 QUEST_TRIGGER_COOLDOWN_S = 5

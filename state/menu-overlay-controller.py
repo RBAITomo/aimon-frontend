@@ -11,6 +11,7 @@ class MenuItem(enum.Enum):
     FOOD_INVENTORY = 1
     BADGES = 2
     MAP = 3
+    VOLUME = 4
 
 
 class MenuState(enum.Enum):

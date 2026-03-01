@@ -24,6 +24,9 @@ BadgesScreenRenderer = _badge_screen_mod.BadgesScreenRenderer
 _map_screen_mod = importlib.import_module("display.map-screen-renderer")
 MapScreenRenderer = _map_screen_mod.MapScreenRenderer
 
+_vol_screen_mod = importlib.import_module("display.volume-screen-renderer")
+VolumeScreenRenderer = _vol_screen_mod.VolumeScreenRenderer
+
 
 class MenuOverlayRenderer:
     """Renders menu overlay on top of compositor output."""
@@ -36,21 +39,23 @@ class MenuOverlayRenderer:
         self._inv_screen = InventoryScreenRenderer()
         self._badge_screen = BadgesScreenRenderer()
         self._map_screen = MapScreenRenderer()
+        self._vol_screen = VolumeScreenRenderer()
         self._screen_map = {
             MenuItem.PET_STATUS: self._pet_screen,
             MenuItem.FOOD_INVENTORY: self._inv_screen,
             MenuItem.BADGES: self._badge_screen,
             MenuItem.MAP: self._map_screen,
+            MenuItem.VOLUME: self._vol_screen,
         }
 
-    def render(self, surface, controller, pet_state=None, food_inventory=None):
+    def render(self, surface, controller, pet_state=None, food_inventory=None, volume_pct=80):
         """Render menu overlay onto surface."""
         # Draw dark semi-transparent overlay
         self._overlay.fill((0, 0, 0, config.MENU_OVERLAY_ALPHA))
         surface.blit(self._overlay, (0, 0))
 
         if controller.in_screen:
-            self._render_screen(surface, controller.current_item, pet_state, food_inventory)
+            self._render_screen(surface, controller.current_item, pet_state, food_inventory, volume_pct)
         else:
             self._render_item_select(surface, controller.current_item)
 
@@ -78,8 +83,11 @@ class MenuOverlayRenderer:
         hint = self._font_small.render("A/D: chon | B: vao | C: dong", True, (100, 100, 100))
         surface.blit(hint, (cx - hint.get_width() // 2, config.LCD_HEIGHT - 25))
 
-    def _render_screen(self, surface, item, pet_state, food_inventory):
+    def _render_screen(self, surface, item, pet_state, food_inventory, volume_pct):
         """Delegate to appropriate sub-screen renderer."""
         renderer = self._screen_map.get(item)
         if renderer:
-            renderer.render(surface, pet_state=pet_state, food_inventory=food_inventory)
+            if item == MenuItem.VOLUME:
+                renderer.render(surface, volume_pct=volume_pct)
+            else:
+                renderer.render(surface, pet_state=pet_state, food_inventory=food_inventory)

@@ -47,7 +47,7 @@ class DisplayEngine:
 
         log.info("DisplayEngine initialized (%dx%d)", config.LCD_WIDTH, config.LCD_HEIGHT)
 
-    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None, menu=None, food_inventory=None):
+    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None, menu=None, food_inventory=None, volume_pct=80):
         """Main render call — delegates to compositor.
 
         Args:
@@ -70,7 +70,7 @@ class DisplayEngine:
         if badge_popup:
             badge_popup.render(self._surface, tick)
         if menu and menu.is_open:
-            self._menu_renderer.render(self._surface, menu, pet_state=pet_state, food_inventory=food_inventory)
+            self._menu_renderer.render(self._surface, menu, pet_state=pet_state, food_inventory=food_inventory, volume_pct=volume_pct)
         self._blit_to_lcd()
         return done
 
