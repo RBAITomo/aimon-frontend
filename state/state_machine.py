@@ -117,10 +117,11 @@ class StateMachine:
         self._pet_state = PetState()
         self._pet_lock = threading.Lock()
 
-        # Button press timing (guarded by _press_lock)
+        # Main button tap tracking (limit switch: each physical press = one edge)
         self._camera = None
-        self._press_start_time = None  # for long-press detection (None = no press active)
-        self._press_lock = threading.Lock()
+        self._tap_times = []  # timestamps of recent taps
+        self._tap_lock = threading.Lock()
+        self._last_tap_time = 0.0  # debounce: ignore edges within this window
 
         # Shutdown flow: warning → 5s countdown → confirm/cancel
         self._shutdown_pending = False
@@ -258,18 +259,32 @@ class StateMachine:
             self._capture.stop()
 
     def _on_button_press(self):
-        """Main button press: shutdown confirm, evolution exit, or record press start time."""
+        """Main button edge (press direction) — route to unified tap handler."""
+        self._on_main_tap()
+
+    def _on_main_tap(self):
+        """Unified handler for main button limit switch.
+
+        Each physical press produces one GPIO edge (alternating press/release).
+        We treat every edge as a 'tap' and use tap counting for shutdown.
+        - Single tap: menu toggle / action
+        - 3 taps within 2s: shutdown warning
+        """
+        now = time.time()
         self._notify_activity()
-        # During shutdown countdown: main press = confirm shutdown
-        # Debounce: ignore presses within 500ms of warning (GPIO bounce on release)
+
+        # Debounce: ignore edges within 200ms of last tap (limit switch bounce)
+        if now - self._last_tap_time < 0.2:
+            return
+        self._last_tap_time = now
+
+        # During shutdown countdown: tap = confirm shutdown
         if self._shutdown_pending:
-            if time.time() - self._shutdown_warning_time >= 0.5:
+            if now - self._shutdown_warning_time >= 0.5:
                 self._confirm_shutdown()
             return
-        with self._press_lock:
-            self._press_start_time = time.time()
 
-        # Evolution: button dismisses hold phase
+        # Evolution: tap dismisses hold phase
         if self._state == State.EVOLUTION and self._evolution_holding:
             self._pet_handler.end_evolution()
             self._display.clear_black_background()
@@ -278,17 +293,48 @@ class StateMachine:
         if self._state == State.EVOLUTION:
             return
 
+        # Track taps for shutdown detection (3 taps within 2s)
+        with self._tap_lock:
+            self._tap_times = [t for t in self._tap_times if now - t < 2.0]
+            self._tap_times.append(now)
+            tap_count = len(self._tap_times)
+
+        if tap_count >= 3:
+            with self._tap_lock:
+                self._tap_times.clear()
+            self._enter_shutdown_warning()
+            return
+
+        # Single/double tap: normal action (menu toggle)
+        # Delay briefly to allow multi-tap detection
+        def _delayed_action():
+            time.sleep(0.35)  # wait for possible follow-up taps
+            with self._tap_lock:
+                # If more taps arrived, a multi-tap handler will deal with it
+                recent = [t for t in self._tap_times if now - t < 0.1]
+                if recent:
+                    return  # newer tap pending, skip this action
+            # Offline long: WiFi QR on double-tap
+            if self._offline:
+                with self._tap_lock:
+                    if tap_count >= 2:
+                        self._trigger_wifi_qr_scan()
+                        return
+            self._toggle_menu()
+
+        threading.Thread(target=_delayed_action, daemon=True).start()
+
     # --- Shutdown flow ---
 
     def _enter_shutdown_warning(self):
-        """Long press detected: show warning, start 5s countdown."""
-        log.warning("Shutdown warning triggered")
+        """Triple-tap detected: show warning, start 5s countdown."""
+        log.warning("Shutdown warning triggered (triple-tap)")
         self._shutdown_pending = True
         now = time.time()
         self._shutdown_deadline = now + 5.0
         self._shutdown_warning_time = now
         self._hat.set_rgb(255, 0, 0)
-        self._last_bubble_text = "Tắt máy? nhấn thêm lần nữa để tắt, bấm A để hủy bỏ."
+        self._last_bubble_text = "Tắt máy? Nhấn thêm lần nữa để tắt, bấm A để hủy. (5s)"
 
     def _confirm_shutdown(self):
         """Main button pressed again during countdown = immediate shutdown."""
@@ -420,28 +466,8 @@ class StateMachine:
     # --- Button release (main) ---
 
     def _on_button_release(self):
-        if self._shutdown_pending:
-            return  # confirm handled by _on_button_press
-        with self._press_lock:
-            if self._press_start_time is None:
-                return  # release without matching press — ignore
-            hold_ms = (time.time() - self._press_start_time) * 1000
-            self._press_start_time = None  # consumed — require new press
-        log.debug("Main button released after %.0f ms", hold_ms)
-        # Sanity check: reject impossibly long holds (stale timestamp from GPIO bounce)
-        if hold_ms > config.SHUTDOWN_HOLD_MS * 3:
-            log.warning("Ignoring spurious hold_ms=%.0f (likely GPIO bounce)", hold_ms)
-            return
-        # Long press: enter shutdown warning + 5s countdown
-        if hold_ms >= config.SHUTDOWN_HOLD_MS:
-            self._enter_shutdown_warning()
-            return
-        # Offline: long press = WiFi QR (keep existing threshold)
-        if self._offline and hold_ms >= config.LONG_PRESS_THRESHOLD_MS:
-            self._trigger_wifi_qr_scan()
-            return
-        # Normal press: toggle menu overlay
-        self._toggle_menu()
+        """Main button edge (release direction) — route to unified tap handler."""
+        self._on_main_tap()
 
     def _toggle_menu(self):
         """Toggle menu overlay on/off."""
