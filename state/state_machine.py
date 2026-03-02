@@ -509,7 +509,7 @@ class StateMachine:
             self._conversation_mode = False
             return
         if self._state == State.LISTENING:
-            self._conversation_mode = False
+            # Manual stop: keep conversation mode so pet answers then auto-resumes
             self._stop_listening()
             return
         if self._state == State.IDLE and not self._offline:
@@ -624,11 +624,12 @@ class StateMachine:
         if self._state != State.LISTENING:
             return
         log.info("VAD triggered: %s (has_speech=%s)", vad_result.value, has_speech)
-        # If max duration with no meaningful speech in conversation mode, exit quietly
         _vad_mod = importlib.import_module("audio.voice-activity-detector")
-        if vad_result == _vad_mod.VadResult.MAX_DURATION and self._conversation_mode:
-            if not has_speech:
-                log.info("Conversation idle timeout — no speech, exiting conversation mode")
+        # No meaningful speech — return to idle quietly
+        if not has_speech:
+            if vad_result in (_vad_mod.VadResult.MAX_DURATION,
+                              _vad_mod.VadResult.INSUFFICIENT_SPEECH):
+                log.info("No speech detected, returning to idle")
                 self._conversation_mode = False
                 self._capture.stop()
                 self._set_state(State.IDLE)
@@ -696,9 +697,19 @@ class StateMachine:
             self._playback.enqueue(pcm_bytes)
 
     def _on_tts_stop(self, has_more):
-        pass
+        # When no more TTS sentences and turn_end hasn't arrived yet, start watchdog
+        if not has_more and not self._finishing_turn:
+            threading.Thread(target=self._turn_end_watchdog, daemon=True).start()
+
+    def _turn_end_watchdog(self):
+        """Safety net: if turn_end never arrives, force transition after playback drains."""
+        time.sleep(2.0)  # give backend time to send turn_end
+        if self._state in (State.ASR, State.ANSWER) and not self._finishing_turn:
+            log.warning("turn_end not received, forcing finish after playback drain")
+            self._on_turn_end("watchdog")
 
     def _on_turn_end(self, turn_id):
+        log.info("turn_end received (state=%s, turn_id=%s)", self._state.value, turn_id)
         if self._state not in (State.ASR, State.ANSWER):
             return
         duration_ms = int((time.time() - self._turn_start_time) * 1000)
