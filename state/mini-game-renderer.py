@@ -37,7 +37,7 @@ H = config.LCD_HEIGHT  # 240
 class MiniGameRenderer:
     """Renders Food Catcher mini-game onto Pygame surface."""
 
-    def __init__(self, controller, font: pygame.font.Font):
+    def __init__(self, controller, font: pygame.font.Font, player_sprite=None):
         self._ctrl = controller
         self._font = font
         # Smaller font for secondary text
@@ -48,6 +48,12 @@ class MiniGameRenderer:
         self._frame = 0
         self._hazard_surface = self._make_hazard_surface()
         self._bg_image = self._load_background()
+        # Scale Mon sprite to player size for game
+        self._player_sprite = None
+        if player_sprite:
+            pw = self._ctrl.player.WIDTH
+            ph = self._ctrl.player.HEIGHT
+            self._player_sprite = pygame.transform.scale(player_sprite, (pw, ph))
 
     def _load_background(self):
         """Load Marshmallow Meadow background for mini-game, fallback to solid color."""
@@ -128,9 +134,12 @@ class MiniGameRenderer:
         if player.is_stunned and (self._frame // 5) % 2 == 0:
             return
 
-        # Green rect placeholder (replace with Mon sprite later)
-        pygame.draw.rect(surface, PLAYER_COLOR,
-                         (int(player.x), player.y_pos, player.WIDTH, player.HEIGHT))
+        if self._player_sprite:
+            surface.blit(self._player_sprite, (int(player.x), player.y_pos))
+        else:
+            # Fallback green rect if sprite unavailable
+            pygame.draw.rect(surface, PLAYER_COLOR,
+                             (int(player.x), player.y_pos, player.WIDTH, player.HEIGHT))
 
     def _render_countdown(self, surface: pygame.Surface):
         num = self._ctrl.countdown_number

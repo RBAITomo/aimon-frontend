@@ -1080,9 +1080,16 @@ class StateMachine:
             ws_send_fn=lambda msg: self._ws.send_mini_game_msg(msg),
             load_sprite_fn=_load_mini_sprite,
         )
+        # Get Mon sprite for player (idle, south-facing, scaled to player size)
+        with self._pet_lock:
+            stage = self._pet_state.stage
+        mon_frame, _ = self._display._compositor._sprite_mgr.get_frame(
+            stage, "idle", 0, "south"
+        )
         self._mini_game_renderer = MiniGameRenderer(
             controller=self._mini_game_ctrl,
             font=self._display.font,
+            player_sprite=mon_frame,
         )
         self._set_state(State.MINI_GAME)
         self._mini_game_ctrl.start()
@@ -1098,6 +1105,10 @@ class StateMachine:
     def _tick_mini_game(self):
         """Advance mini-game controller and render."""
         if self._mini_game_ctrl:
+            # Hold-to-move: poll GPIO pin state each frame
+            a_held = self._hat.button_a_pressed()
+            d_held = self._hat.button_d_pressed()
+            self._mini_game_ctrl.poll_buttons(a_held, d_held)
             self._mini_game_ctrl.tick()
         if self._mini_game_renderer:
             self._display.render_mini_game(self._mini_game_renderer)
