@@ -115,6 +115,7 @@ class StateMachine:
 
         # Conversation mode: single press toggles, VAD auto-detects speech end
         self._conversation_mode = False
+        self._empty_asr_count = 0  # consecutive empty ASR results
         self._finishing_turn = False  # guard against double _finish_turn_after_playback
 
         # Pet state for compositor rendering (guarded by _pet_lock)
@@ -672,13 +673,19 @@ class StateMachine:
         log.info("ASR: '%s' (conf=%.2f)", text, confidence)
         self._turn_user_text = text
         if text.strip():
+            self._empty_asr_count = 0
             self._set_state(State.ANSWER)
             self._playback.start()
         else:
+            self._empty_asr_count += 1
             log.info("Empty ASR result, returning to IDLE")
             self._set_state(State.IDLE)
-            # In conversation mode, auto-resume even on empty ASR
-            if self._conversation_mode:
+            # Exit conversation mode after 2 consecutive empty results
+            if self._empty_asr_count >= 2:
+                log.info("Too many empty ASR results, exiting conversation mode")
+                self._conversation_mode = False
+                self._empty_asr_count = 0
+            elif self._conversation_mode:
                 threading.Thread(target=self._auto_resume_listening, daemon=True).start()
 
     def _on_llm_stream(self, token, done):

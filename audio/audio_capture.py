@@ -131,8 +131,8 @@ class AudioCapture:
                                 ).start()
                         elif result == VadResult.INSUFFICIENT_SPEECH:
                             self._insufficient_count += 1
-                            if self._insufficient_count >= 3:
-                                # No real speech after multiple silence cycles — treat as idle
+                            if self._insufficient_count >= 2:
+                                # No real speech after silence cycles — treat as idle
                                 self._vad_fired = True
                                 if self._on_vad_stop:
                                     threading.Thread(
