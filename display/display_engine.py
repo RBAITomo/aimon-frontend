@@ -44,6 +44,7 @@ class DisplayEngine:
         self._menu_renderer = MenuOverlayRenderer()
         self._font_large = pygame.font.SysFont("dejavusans", 22)
         self._font_small = pygame.font.SysFont("dejavusans", 16)
+        self._camera_flash_frames = 0  # remaining flash frames
 
         log.info("DisplayEngine initialized (%dx%d)", config.LCD_WIDTH, config.LCD_HEIGHT)
 
@@ -71,6 +72,13 @@ class DisplayEngine:
             badge_popup.render(self._surface, tick)
         if menu and menu.is_open:
             self._menu_renderer.render(self._surface, menu, pet_state=pet_state, food_inventory=food_inventory, volume_pct=volume_pct)
+        if self._camera_flash_frames > 0:
+            alpha = int(200 * (self._camera_flash_frames / 4))
+            flash = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT))
+            flash.fill((255, 255, 255))
+            flash.set_alpha(alpha)
+            self._surface.blit(flash, (0, 0))
+            self._camera_flash_frames -= 1
         self._blit_to_lcd()
         return done
 
@@ -108,11 +116,8 @@ class DisplayEngine:
         self._blit_to_lcd()
 
     def trigger_camera_flash(self):
-        """Render a single white flash frame to signal photo capture."""
-        flash = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT))
-        flash.fill((255, 255, 255))
-        self._surface.blit(flash, (0, 0))
-        self._blit_to_lcd()
+        """Request a white flash overlay for the next few render frames."""
+        self._camera_flash_frames = 4  # ~130ms at 30 FPS
 
     def render_evolution(self, tick, pet_state):
         """Render evolution flash sequence on top of compositor frame.
