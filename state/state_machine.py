@@ -70,6 +70,11 @@ _menu_ctrl_mod = importlib.import_module("state.menu-overlay-controller")
 MenuOverlayController = _menu_ctrl_mod.MenuOverlayController
 MenuItem = _menu_ctrl_mod.MenuItem
 
+_mg_ctrl_mod = importlib.import_module("state.mini-game-controller")
+MiniGameController = _mg_ctrl_mod.MiniGameController
+_mg_rend_mod = importlib.import_module("state.mini-game-renderer")
+MiniGameRenderer = _mg_rend_mod.MiniGameRenderer
+
 
 class State(enum.Enum):
     IDLE = "idle"
@@ -79,6 +84,7 @@ class State(enum.Enum):
     EMOTION = "emotion"
     OFFLINE = "offline"
     EVOLUTION = "evolution"  # black screen flash → hold new form until button
+    MINI_GAME = "mini_game"  # food catcher arcade game (full-screen replacement)
 
 
 # Map conversation state -> pet animation name
@@ -166,6 +172,10 @@ class StateMachine:
 
         # Menu overlay controller
         self._menu = MenuOverlayController()
+
+        # Mini-game (Food Catcher) — initialized on demand
+        self._mini_game_ctrl = None
+        self._mini_game_renderer = None
         self._volume = VolumeControl()
 
         # Offline gameplay components
@@ -230,12 +240,15 @@ class StateMachine:
         self._ws.on_quest_start = self._pet_handler.on_quest_start
         self._ws.on_location_changed = self._pet_handler.on_location_changed
         self._ws.on_sync_result = self._on_sync_result
+        self._ws.on_mini_game_ready = self._on_mini_game_ready
+        self._ws.on_mini_game_reward = self._on_mini_game_reward
 
     _LED_MAP = {
         State.IDLE: config.LED_IDLE, State.LISTENING: config.LED_LISTENING,
         State.ASR: config.LED_ASR, State.ANSWER: config.LED_ANSWER,
         State.EMOTION: config.LED_EMOTION_HAPPY, State.OFFLINE: config.LED_OFFLINE,
         State.EVOLUTION: (160, 0, 220),  # purple during evolution
+        State.MINI_GAME: config.LED_MINI_GAME,
     }
 
     def _set_state(self, new_state):
@@ -297,6 +310,10 @@ class StateMachine:
             self._set_state(State.IDLE)
             return
         if self._state == State.EVOLUTION:
+            return
+
+        # Mini-game: ignore main button taps
+        if self._state == State.MINI_GAME:
             return
 
         # Track taps: cancel previous timer, increment count, start new timer
@@ -496,6 +513,9 @@ class StateMachine:
     def _on_button_a_press(self):
         self._notify_activity()
         log.info("Button A pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
+        if self._state == State.MINI_GAME and self._mini_game_ctrl:
+            self._mini_game_ctrl.on_button_a()
+            return
         if self._menu.is_open:
             if self._menu.in_screen and self._menu.current_item == MenuItem.VOLUME:
                 self._volume.increase()
@@ -528,7 +548,16 @@ class StateMachine:
     def _on_button_b_press(self):
         self._notify_activity()
         log.info("Button B pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
+        if self._state == State.MINI_GAME and self._mini_game_ctrl:
+            result = self._mini_game_ctrl.on_button_b()
+            if result == "exit":
+                self._exit_mini_game()
+            return
         if self._menu.is_open:
+            if self._menu.current_item == MenuItem.MINI_GAME and not self._menu.in_screen:
+                self._menu.toggle()  # close menu
+                self._enter_mini_game()
+                return
             self._menu.enter()
             return
         if self._state != State.IDLE:
@@ -547,6 +576,11 @@ class StateMachine:
     def _on_button_c_press(self):
         self._notify_activity()
         log.info("Button C pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
+        if self._state == State.MINI_GAME and self._mini_game_ctrl:
+            result = self._mini_game_ctrl.on_button_c()
+            if result == "exit":
+                self._exit_mini_game()
+            return
         if self._menu.is_open:
             self._menu.back()
             return
@@ -562,6 +596,9 @@ class StateMachine:
     def _on_button_d_press(self):
         self._notify_activity()
         log.info("Button D pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
+        if self._state == State.MINI_GAME and self._mini_game_ctrl:
+            self._mini_game_ctrl.on_button_d()
+            return
         if self._menu.is_open:
             if self._menu.in_screen and self._menu.current_item == MenuItem.VOLUME:
                 self._volume.decrease()
@@ -879,6 +916,10 @@ class StateMachine:
             self._tick_evolution()
             return
 
+        if state == State.MINI_GAME:
+            self._tick_mini_game()
+            return
+
         if state == State.EMOTION:
             self._emotion_tick += 1
 
@@ -1024,6 +1065,62 @@ class StateMachine:
 
             self._display.render(self._evolution_tick, pet_snapshot, None, None)
 
+    # --- Mini-game (Food Catcher) ---
+
+    def _enter_mini_game(self):
+        """Initialize and start the Food Catcher mini-game."""
+        _obj = importlib.import_module("state.mini-game-objects")
+        _item_size = _obj.ITEM_SIZE
+
+        def _load_mini_sprite(key):
+            surf = self._food_mgr._load_sprite(key)
+            return pygame.transform.scale(surf, (_item_size, _item_size))
+
+        self._mini_game_ctrl = MiniGameController(
+            ws_send_fn=lambda msg: self._ws.send_mini_game_msg(msg),
+            load_sprite_fn=_load_mini_sprite,
+        )
+        self._mini_game_renderer = MiniGameRenderer(
+            controller=self._mini_game_ctrl,
+            font=self._display.font,
+        )
+        self._set_state(State.MINI_GAME)
+        self._mini_game_ctrl.start()
+        log.info("Entered mini-game")
+
+    def _exit_mini_game(self):
+        """Clean up and return to IDLE."""
+        self._mini_game_ctrl = None
+        self._mini_game_renderer = None
+        self._set_state(State.IDLE)
+        log.info("Exited mini-game")
+
+    def _tick_mini_game(self):
+        """Advance mini-game controller and render."""
+        if self._mini_game_ctrl:
+            self._mini_game_ctrl.tick()
+        if self._mini_game_renderer:
+            self._display.render_mini_game(self._mini_game_renderer)
+
+    def _on_mini_game_ready(self, msg):
+        """Handle mini_game_ready WS response."""
+        if self._mini_game_ctrl:
+            self._mini_game_ctrl.on_game_ready(
+                success=msg.get("success", False),
+                reason=msg.get("reason"),
+            )
+
+    def _on_mini_game_reward(self, msg):
+        """Handle mini_game_reward WS response."""
+        if self._mini_game_ctrl:
+            cotton_candy = msg.get("cotton_candy", 0)
+            self._mini_game_ctrl.on_reward(cotton_candy)
+            # Add cotton candy to frontend JSON inventory
+            if cotton_candy > 0:
+                for _ in range(cotton_candy):
+                    self._food_inventory.add("cotton-candy", "cotton-candy")
+                log.info("Added %d cotton candy to inventory", cotton_candy)
+
     def update_pet_state(self, **kwargs):
         """Update pet state from backend pet_status messages (thread-safe).
 
@@ -1065,7 +1162,9 @@ class StateMachine:
         """Return LCD_FPS_STANDBY in standby, LCD_FPS_IDLE during IDLE/OFFLINE, LCD_FPS otherwise."""
         if self._in_standby:
             return config.LCD_FPS_STANDBY
-        return config.LCD_FPS_IDLE if self._state in (State.IDLE, State.OFFLINE) else config.LCD_FPS
+        if self._state in (State.IDLE, State.OFFLINE):
+            return config.LCD_FPS_IDLE
+        return config.LCD_FPS
 
     @property
     def state(self):

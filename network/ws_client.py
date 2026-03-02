@@ -50,6 +50,8 @@ class WSClient:
         self.on_quest_start = None
         self.on_sync_result = None
         self.on_location_changed = None
+        self.on_mini_game_ready = None
+        self.on_mini_game_reward = None
 
     def connect(self):
         url = f"{config.BACKEND_WS_URL}/ws/audio/{config.ROBOT_ID}"
@@ -169,6 +171,10 @@ class WSClient:
             "events": events,
             "state": state_snapshot,
         })
+
+    def send_mini_game_msg(self, msg: dict):
+        """Send an arbitrary mini-game WS message."""
+        self._send_json(msg)
 
     def send_ping(self):
         self._send_json({"type": "ping"})
@@ -297,6 +303,14 @@ class WSClient:
         elif msg_type == "location_changed":
             if self.on_location_changed:
                 self.on_location_changed(msg)
+
+        elif msg_type == "mini_game_ready":
+            if self.on_mini_game_ready:
+                self.on_mini_game_ready(msg)
+
+        elif msg_type == "mini_game_reward":
+            if self.on_mini_game_reward:
+                self.on_mini_game_reward(msg)
 
         elif msg_type == "pong":
             log.debug("Pong received")

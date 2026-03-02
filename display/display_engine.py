@@ -82,6 +82,16 @@ class DisplayEngine:
         self._blit_to_lcd()
         return done
 
+    def render_mini_game(self, mini_game_renderer):
+        """Render mini-game frame (full-screen replacement, no compositor)."""
+        mini_game_renderer.render(self._surface)
+        self._blit_to_lcd()
+
+    @property
+    def font(self) -> pygame.font.Font:
+        """Font for mini-game renderer to use."""
+        return self._font_large
+
     def render_offline(self, tick):
         """Render offline/disconnected screen (no compositor)."""
         self._surface.fill(_COL_BG)

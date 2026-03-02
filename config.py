@@ -189,7 +189,7 @@ FOOD_INVENTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "food-inve
 # --- Menu Overlay ---
 MENU_OVERLAY_ALPHA = 180
 MENU_LABEL_FONT_SIZE = 24
-MENU_ITEM_NAMES = ["Trạng Thái", "Kho Đồ Ăn", "Huy hiệu", "Bản đồ", "Âm lượng"]
+MENU_ITEM_NAMES = ["Trạng Thái", "Kho Đồ Ăn", "Huy hiệu", "Bản đồ", "Âm lượng", "Mini Game"]
 
 # --- Volume ---
 VOLUME_DEFAULT = 80   # percent (0-100)
@@ -199,6 +199,10 @@ VOLUME_AMIXER_CONTROLS = ["Headphone", "Speaker", "Speaker AC", "Speaker DC"]
 
 # --- Quest ---
 QUEST_TRIGGER_COOLDOWN_S = 5
+
+# --- Mini-game (Food Catcher) ---
+MINI_GAME_ENERGY_COST = 20
+LED_MINI_GAME = (255, 0, 255)  # magenta
 LED_QUEST = (100, 255, 100)  # green pulse for quest trigger
 
 # --- Offline Gameplay ---

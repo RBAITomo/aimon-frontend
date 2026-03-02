@@ -12,6 +12,7 @@ class MenuItem(enum.Enum):
     BADGES = 2
     MAP = 3
     VOLUME = 4
+    MINI_GAME = 5
 
 
 class MenuState(enum.Enum):
