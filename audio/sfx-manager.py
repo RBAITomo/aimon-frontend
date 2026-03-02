@@ -25,6 +25,7 @@ _SFX_REGISTRY = {
     "transform": ("transform.ogg", "primary"),
     "warning": ("warning.ogg", "ambient"),
     "regression": ("regression.ogg", "ambient"),
+    "shutter": ("shutter.wav", "notify"),
 }
 
 

@@ -107,6 +107,13 @@ class DisplayEngine:
             y += 22
         self._blit_to_lcd()
 
+    def trigger_camera_flash(self):
+        """Render a single white flash frame to signal photo capture."""
+        flash = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT))
+        flash.fill((255, 255, 255))
+        self._surface.blit(flash, (0, 0))
+        self._blit_to_lcd()
+
     def render_evolution(self, tick, pet_state):
         """Render evolution flash sequence on top of compositor frame.
 

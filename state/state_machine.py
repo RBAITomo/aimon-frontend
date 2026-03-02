@@ -376,6 +376,8 @@ class StateMachine:
             return
 
         self._hat.set_rgb_tuple(config.LED_CAMERA)
+        self._sfx.play("shutter")
+        self._display.trigger_camera_flash()
         log.info("Camera capture triggered (Button B)")
 
         def _capture_and_analyze():
