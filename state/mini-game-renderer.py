@@ -117,6 +117,11 @@ class MiniGameRenderer:
         hi_text = self._small_font.render(f"HI:{self._ctrl.high_score}", True, TEXT_COLOR)
         surface.blit(hi_text, ((W - hi_text.get_width()) // 2, 4))
 
+        # Lives — below score (left side)
+        lives = self._ctrl.lives_remaining
+        lives_text = self._small_font.render(f"x{lives}", True, (255, 100, 100))
+        surface.blit(lives_text, (4, 18))
+
         # Timer bar — top right
         bar_x = W - TIMER_BAR_WIDTH - 4
         bar_y = 6

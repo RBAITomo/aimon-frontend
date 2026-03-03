@@ -25,9 +25,9 @@ HAZARD_SPRITES = ["hazard_rock", "hazard_trash"]
 
 # Difficulty tiers: (fall_speed_px_per_frame, spawn_interval_frames, food_ratio)
 TIER_CONFIG = [
-    (2.0, 30, 0.85),   # 0-30s: slow, ~1/sec, mostly food
-    (3.0, 20, 0.75),   # 30-60s: medium, ~1.5/sec
-    (4.0, 15, 0.65),   # 60-90s: fast, ~2/sec
+    (2.0, 30, 0.30),   # 0-30s: slow, ~1/sec, 30% food / 70% hazards
+    (3.0, 20, 0.30),   # 30-60s: medium, ~1.5/sec
+    (4.0, 15, 0.30),   # 60-90s: fast, ~2/sec
 ]
 
 MAX_ITEMS = 8

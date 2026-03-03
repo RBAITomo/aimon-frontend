@@ -31,6 +31,7 @@ class MiniGameController:
     GAME_DURATION_FRAMES = 2700   # 90s * 30fps
     COUNTDOWN_FRAMES = 90         # 3s countdown
     TIER_THRESHOLDS = [900, 1800] # frames where tier increases (30s, 60s)
+    MAX_OBSTACLE_HITS = 3         # game over after 3 obstacle hits
 
     def __init__(self, ws_send_fn, load_sprite_fn):
         """
@@ -48,6 +49,7 @@ class MiniGameController:
         self._waiting_frames = 0
         self._high_score = 0
         self._cotton_candy_earned = 0
+        self._obstacle_hits = 0
         self._error_reason = None
 
     # --- Lifecycle ---
@@ -76,6 +78,7 @@ class MiniGameController:
         self._score = 0
         self._timer_frames = self.GAME_DURATION_FRAMES
         self._cotton_candy_earned = 0
+        self._obstacle_hits = 0
         self._player.reset()
         self._spawner.reset()
         self._spawner.set_tier(0)
@@ -126,7 +129,11 @@ class MiniGameController:
                 if item.item_type == "food":
                     self._score += 10
                 else:
+                    self._obstacle_hits += 1
                     self._player.stun()
+                    if self._obstacle_hits >= self.MAX_OBSTACLE_HITS:
+                        self._end_game()
+                        return
                 items_to_remove.append(i)
 
         for i in reversed(items_to_remove):
@@ -230,6 +237,14 @@ class MiniGameController:
     @property
     def items(self):
         return self._spawner.items
+
+    @property
+    def obstacle_hits(self) -> int:
+        return self._obstacle_hits
+
+    @property
+    def lives_remaining(self) -> int:
+        return max(0, self.MAX_OBSTACLE_HITS - self._obstacle_hits)
 
     @property
     def cotton_candy_earned(self) -> int:
