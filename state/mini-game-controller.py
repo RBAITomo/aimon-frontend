@@ -153,22 +153,27 @@ class MiniGameController:
     # --- Button handlers ---
 
     def poll_buttons(self, button_a_held: bool, button_d_held: bool):
-        """Hold-to-move: call each tick with GPIO pin states."""
+        """Hold-to-move: call each tick with GPIO pin states.
+
+        A = move right, D = move left (swapped for physical button layout).
+        Resets moving direction each frame before checking buttons.
+        """
+        self._player.moving = None
         if self._state == GameState.PLAYING:
             if button_a_held:
-                self._player.move_left()
-            if button_d_held:
                 self._player.move_right()
+            if button_d_held:
+                self._player.move_left()
 
     def on_button_a(self):
-        """Move left (edge callback fallback)."""
-        if self._state == GameState.PLAYING:
-            self._player.move_left()
-
-    def on_button_d(self):
         """Move right (edge callback fallback)."""
         if self._state == GameState.PLAYING:
             self._player.move_right()
+
+    def on_button_d(self):
+        """Move left (edge callback fallback)."""
+        if self._state == GameState.PLAYING:
+            self._player.move_left()
 
     def on_button_b(self):
         """Pause/resume or exit game-over screen."""

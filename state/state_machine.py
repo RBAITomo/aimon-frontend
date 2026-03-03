@@ -188,6 +188,7 @@ class StateMachine:
         self._last_activity = time.time()
         self._backlight_dimmed = False
         self._in_standby = False
+        self._pending_quick_feed = False  # GPIO thread sets True, main loop processes
         self._last_battery_refresh = 0.0  # epoch 0 triggers first refresh immediately
 
         # Battery monitor (Waveshare UPS HAT C / INA219 at 0x43)
@@ -586,7 +587,9 @@ class StateMachine:
             return
         if self._state != State.IDLE:
             return
-        self._quick_feed_from_inventory()
+        # Queue for main loop — pygame operations (image load, smoothscale)
+        # are not thread-safe and crash when called from GPIO callback thread.
+        self._pending_quick_feed = True
 
     def _on_button_c_release(self):
         pass
@@ -799,13 +802,20 @@ class StateMachine:
         pass
 
     def _on_pet_feed_result(self, success, food_name, hunger_reduction):
-        """Handle feed result after camera food confirmation."""
+        """Handle feed result after camera food confirmation.
+
+        Called from WS receive thread — must not reset _emotion_tick if EMOTION
+        is already active (would reset the exit-timeout counter and loop forever).
+        """
         if success:
             log.info("Fed with %s (hunger -%d)", food_name, hunger_reduction)
-            # Use "eating" as the emotion so _set_state(EMOTION) picks it up
-            self._current_emotion = "eating"
-            self._emotion_tick = 0
-            self._set_state(State.EMOTION)
+            # Only start a fresh EMOTION cycle if we are not already in one.
+            # Re-entrancy from WS thread would reset _emotion_tick to 0, making
+            # the 150-tick exit timeout restart indefinitely (permanent freeze).
+            if self._state != State.EMOTION:
+                self._current_emotion = "eating"
+                self._emotion_tick = 0
+                self._set_state(State.EMOTION)
         else:
             log.warning("Feed failed for %s", food_name)
 
@@ -895,6 +905,12 @@ class StateMachine:
     def tick(self):
         """Called once per frame (adaptive FPS). Updates display for current state."""
         self._tick += 1
+
+        # Process queued quick-feed on main thread (pygame ops not thread-safe)
+        if self._pending_quick_feed and self._state == State.IDLE:
+            self._pending_quick_feed = False
+            self._quick_feed_from_inventory()
+
         # Shutdown countdown check
         self._check_shutdown_countdown()
         # Backlight dim / standby check every ~1s
@@ -993,10 +1009,19 @@ class StateMachine:
         # Return to IDLE when emotion animation completes or after 3s timeout
         # (In conversation mode, _finish_turn_after_playback handles EMOTION→IDLE transition)
         if state == State.EMOTION and not self._conversation_mode:
-            # Eating: play eating anim for ~3s, then switch to happy for remainder
+            # Eating: play eating anim for ~3s, then return directly to IDLE.
+            # Previously this only switched _current_emotion to "happy" without
+            # exiting EMOTION — the elif below then needed another tick >= 150
+            # to fire, but since happy is a looping anim (done=False) the only
+            # exit was tick > 150. For pet stages without an "eating" animation
+            # (e.g. adult form) sprite-sheet falls back to idle (looping,
+            # done=False forever), so the timeout at >150 was the ONLY exit.
+            # That is fine under normal conditions but any reset of _emotion_tick
+            # from the WS thread (re-entrant feed result) would loop forever.
+            # Fix: exit EMOTION directly after eating display period.
             if self._current_emotion == "eating" and self._emotion_tick >= 90:
                 self._current_emotion = "happy"
-                self._pet_state.animation = "happy"
+                self._set_state(State.IDLE)
             elif (done and self._emotion_tick >= 60) or self._emotion_tick > 150:
                 self._current_emotion = "happy"  # restore default emotion
                 self._set_state(State.IDLE)
@@ -1090,6 +1115,8 @@ class StateMachine:
             controller=self._mini_game_ctrl,
             font=self._display.font,
             player_sprite=mon_frame,
+            sprite_mgr=self._display._compositor._sprite_mgr,
+            stage=stage,
         )
         self._set_state(State.MINI_GAME)
         self._mini_game_ctrl.start()

@@ -71,14 +71,17 @@ class Player:
         self.x = (play_area_width - self.WIDTH) // 2
         self.y_pos = play_area_bottom - self.HEIGHT - 4  # 4px padding from bottom
         self.stun_timer = 0
+        self.moving = None  # None=idle, "left", "right"
 
     def move_left(self):
         if not self.is_stunned:
             self.x = max(0, self.x - self.MOVE_SPEED)
+            self.moving = "left"
 
     def move_right(self):
         if not self.is_stunned:
             self.x = min(self._area_w - self.WIDTH, self.x + self.MOVE_SPEED)
+            self.moving = "right"
 
     def stun(self):
         self.stun_timer = self.STUN_DURATION
@@ -98,6 +101,7 @@ class Player:
     def reset(self):
         self.x = (self._area_w - self.WIDTH) // 2
         self.stun_timer = 0
+        self.moving = None
 
 
 class ItemSpawner:

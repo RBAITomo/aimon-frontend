@@ -37,9 +37,12 @@ H = config.LCD_HEIGHT  # 240
 class MiniGameRenderer:
     """Renders Food Catcher mini-game onto Pygame surface."""
 
-    def __init__(self, controller, font: pygame.font.Font, player_sprite=None):
+    def __init__(self, controller, font: pygame.font.Font,
+                 player_sprite=None, sprite_mgr=None, stage=None):
         self._ctrl = controller
         self._font = font
+        self._sprite_mgr = sprite_mgr
+        self._stage = stage
         # Smaller font for secondary text
         try:
             self._small_font = pygame.font.Font(font.name if hasattr(font, 'name') else None, 12)
@@ -48,12 +51,14 @@ class MiniGameRenderer:
         self._frame = 0
         self._hazard_surface = self._make_hazard_surface()
         self._bg_image = self._load_background()
-        # Scale Mon sprite to player size for game
+        # Scale Mon idle sprite as fallback
         self._player_sprite = None
         if player_sprite:
             pw = self._ctrl.player.WIDTH
             ph = self._ctrl.player.HEIGHT
             self._player_sprite = pygame.transform.scale(player_sprite, (pw, ph))
+        # Cache for scaled walking/idle frames
+        self._sprite_cache = {}
 
     def _load_background(self):
         """Load Marshmallow Meadow background for mini-game, fallback to solid color."""
@@ -128,14 +133,33 @@ class MiniGameRenderer:
             else:
                 surface.blit(item.surface, (int(item.x), int(item.y)))
 
+    def _get_player_frame(self):
+        """Get the appropriate animation frame based on player movement state."""
+        player = self._ctrl.player
+        pw, ph = player.WIDTH, player.HEIGHT
+
+        if self._sprite_mgr and self._stage and player.moving:
+            # Use walking animation when moving
+            direction = "west" if player.moving == "left" else "east"
+            frame, _ = self._sprite_mgr.get_frame(
+                self._stage, "walking", self._frame, direction
+            )
+            cache_key = ("walking", direction, id(frame))
+            if cache_key not in self._sprite_cache:
+                self._sprite_cache[cache_key] = pygame.transform.scale(frame, (pw, ph))
+            return self._sprite_cache[cache_key]
+
+        return self._player_sprite
+
     def _render_player(self, surface: pygame.Surface):
         player = self._ctrl.player
         # Stun flash: alternate visibility every 5 frames
         if player.is_stunned and (self._frame // 5) % 2 == 0:
             return
 
-        if self._player_sprite:
-            surface.blit(self._player_sprite, (int(player.x), player.y_pos))
+        sprite = self._get_player_frame()
+        if sprite:
+            surface.blit(sprite, (int(player.x), player.y_pos))
         else:
             # Fallback green rect if sprite unavailable
             pygame.draw.rect(surface, PLAYER_COLOR,
