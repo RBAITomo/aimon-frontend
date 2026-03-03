@@ -195,4 +195,9 @@ class DisplayEngine:
         """Convert Pygame surface to RGB565 and send to LCD via SPI."""
         from hardware.whisplay_hat import surface_to_rgb565
         rgb565_data = surface_to_rgb565(self._surface)
-        self._hat.draw_frame(rgb565_data)
+        try:
+            self._hat.draw_frame(rgb565_data)
+        except Exception as e:  # noqa: BLE001
+            # SPI errors (IOError/OSError) on Pi Zero 2 under heavy load must not
+            # crash the main loop — log and skip this frame.
+            log.warning("LCD blit failed (skipping frame): %s", e)
