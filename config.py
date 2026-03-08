@@ -186,10 +186,27 @@ SHUTDOWN_HOLD_MS = 5000  # hold main button 5s = enter shutdown warning
 FOOD_INVENTORY_MAX = 20
 FOOD_INVENTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "food-inventory.json")
 
+# --- Food Journal (Cookbook) ---
+FOOD_JOURNAL_PATH = os.path.join(os.path.dirname(__file__), "data", "food-journal.json")
+FOOD_REGION_MAP_PATH = os.path.join(os.path.dirname(__file__), "data", "food-region-map.json")
+
+# Cookbook grid layout
+COOKBOOK_GRID_COLS = 5
+COOKBOOK_GRID_ROWS = 4
+COOKBOOK_CELL_SIZE = 52
+COOKBOOK_SPRITE_SIZE = 36
+COOKBOOK_GRID_START_Y = 50
+COOKBOOK_GRID_START_X = 8
+
+# Badge assets
+BADGE_ASSETS_PATH = os.path.join(os.path.dirname(__file__), "assets", "badges")
+BADGE_GRID_COLS = 5
+BADGE_GRID_ROWS = 2
+
 # --- Menu Overlay ---
 MENU_OVERLAY_ALPHA = 180
 MENU_LABEL_FONT_SIZE = 24
-MENU_ITEM_NAMES = ["Trạng Thái", "Kho Đồ Ăn", "Huy hiệu", "Bản đồ", "Âm lượng", "Mini Game"]
+MENU_ITEM_NAMES = ["Trạng Thái", "Kho Đồ Ăn", "Huy hiệu", "Bản đồ", "Âm lượng", "Mini Game", "Sách Nấu Ăn"]
 
 # --- Volume ---
 VOLUME_DEFAULT = 80   # percent (0-100)

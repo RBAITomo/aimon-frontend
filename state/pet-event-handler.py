@@ -5,8 +5,10 @@ Updates PetState, triggers SFX, badge popups, and animation flags.
 All methods are WebSocket callbacks invoked from the recv thread.
 """
 
+import json
 import logging
 import threading
+import urllib.request
 
 import config
 
@@ -24,6 +26,9 @@ class PetEventHandler:
         self._badge_popup = badge_popup
         self._food_mgr = food_mgr
         self._ws = ws
+
+        # Badge cache (fetched from REST API on connect), guarded by _pet_lock
+        self._badges_cache = None  # list of badge dicts or None
 
         # Animation state flags (read by StateMachine.tick)
         self._evolution_pending = None   # (old_stage, new_stage) or None
@@ -95,12 +100,20 @@ class PetEventHandler:
             log.warning("Feed failed: %s", data.get("food_name"))
 
     def on_badge_earned(self, data):
-        """Show badge popup + play SFX."""
+        """Show badge popup + play SFX. Update badge cache."""
         self._sfx.play("badge")
         name = data.get("name", "Badge")
         desc = data.get("description", "")
         self._badge_popup.show(name, desc)
         log.info("Badge earned: %s", name)
+        # Update cache: mark badge as earned (guarded by pet_lock)
+        code = data.get("badge_code", "")
+        with self._pet_lock:
+            if self._badges_cache and code:
+                for b in self._badges_cache:
+                    if b.get("code") == code:
+                        b["earned"] = True
+                        break
 
     def on_pet_evolution(self, data):
         """Trigger evolution animation sequence."""
@@ -216,6 +229,27 @@ class PetEventHandler:
             self._ws.send_feed_confirm(food_name, sprite_key)
         log.info("Auto-eat: %s (sprite=%s)", food_name, sprite_key)
 
+    @property
+    def badges_cache(self):
+        """Thread-safe read of badge cache for rendering."""
+        with self._pet_lock:
+            return list(self._badges_cache) if self._badges_cache else None
+
     def clear_quest(self):
         self._quest_text = None
         self._quest_dismissed = True
+
+    def fetch_badges(self, user_id: str):
+        """Fetch all badges from REST API in background thread. Cache result."""
+        def _fetch():
+            url = f"{config.BACKEND_HTTP_URL}/api/badges/{user_id}"
+            try:
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                with self._pet_lock:
+                    self._badges_cache = data
+                log.info("Fetched %d badges from API", len(data))
+            except Exception as e:
+                log.warning("Failed to fetch badges: %s", e)
+        threading.Thread(target=_fetch, daemon=True).start()

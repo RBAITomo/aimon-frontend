@@ -48,7 +48,7 @@ class DisplayEngine:
 
         log.info("DisplayEngine initialized (%dx%d)", config.LCD_WIDTH, config.LCD_HEIGHT)
 
-    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None, menu=None, food_inventory=None, volume_pct=80):
+    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None, menu=None, food_inventory=None, food_journal=None, volume_pct=80, badges_data=None):
         """Main render call — delegates to compositor.
 
         Args:
@@ -71,7 +71,7 @@ class DisplayEngine:
         if badge_popup:
             badge_popup.render(self._surface, tick)
         if menu and menu.is_open:
-            self._menu_renderer.render(self._surface, menu, pet_state=pet_state, food_inventory=food_inventory, volume_pct=volume_pct)
+            self._menu_renderer.render(self._surface, menu, pet_state=pet_state, food_inventory=food_inventory, food_journal=food_journal, volume_pct=volume_pct, badges_data=badges_data)
         if self._camera_flash_frames > 0:
             alpha = int(200 * (self._camera_flash_frames / 4))
             flash = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT))

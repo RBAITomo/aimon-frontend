@@ -172,6 +172,10 @@ class WSClient:
             "state": state_snapshot,
         })
 
+    def send_pet_action(self, action: str, amount: int = 1):
+        """Send pet action event to backend for badge tracking."""
+        self._send_json({"type": "pet_action", "action": action, "amount": amount})
+
     def send_mini_game_msg(self, msg: dict):
         """Send an arbitrary mini-game WS message."""
         self._send_json(msg)

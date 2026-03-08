@@ -170,6 +170,11 @@ class StateMachine:
         # Food inventory (persistent JSON storage)
         self._food_inventory = FoodInventoryManager()
 
+        # Food journal (cookbook collection — permanent record of discovered foods)
+        _journal_mod = importlib.import_module("state.food-journal-manager")
+        FoodJournalManager = _journal_mod.FoodJournalManager
+        self._food_journal = FoodJournalManager()
+
         # Menu overlay controller
         self._menu = MenuOverlayController()
 
@@ -419,8 +424,18 @@ class StateMachine:
                     # Store in inventory instead of immediate feed
                     self._food_inventory.add(food, sprite_key)
                     self._food_mgr.add(sprite_key, food, eat_immediately=False)
-                    self._last_bubble_text = f"{food} - đã lưu vào kho!"
                     self._sfx.play("collect")
+
+                    # Record in food journal (cookbook collection)
+                    is_new = self._food_journal.record(food, sprite_key)
+                    if is_new:
+                        count = self._food_journal.unique_count()
+                        self._last_bubble_text = f"Món mới! {food} ({count} món)"
+                        # Notify backend for badge tracking
+                        if not self._offline and self._ws:
+                            self._ws.send_pet_action("unique_food")
+                    else:
+                        self._last_bubble_text = f"{food} - đã lưu vào kho!"
                 else:
                     desc = result.get("description", "")
                     log.info("Non-food: %s", desc)
@@ -520,6 +535,10 @@ class StateMachine:
         if self._menu.is_open:
             if self._menu.in_screen and self._menu.current_item == MenuItem.VOLUME:
                 self._volume.increase()
+            elif self._menu.in_screen and self._menu.current_item == MenuItem.COOKBOOK:
+                self._display._menu_renderer.cookbook_screen.next_page()
+            elif self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
+                self._display._menu_renderer.badge_screen.next_selection()
             else:
                 self._menu.next_item()
             return
@@ -559,6 +578,9 @@ class StateMachine:
                 self._menu.toggle()  # close menu
                 self._enter_mini_game()
                 return
+            if self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
+                self._display._menu_renderer.badge_screen.toggle_detail()
+                return
             self._menu.enter()
             return
         if self._state != State.IDLE:
@@ -583,6 +605,10 @@ class StateMachine:
                 self._exit_mini_game()
             return
         if self._menu.is_open:
+            # Badge detail mode: C goes back to grid first
+            if self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
+                if not self._display._menu_renderer.badge_screen.back():
+                    return  # handled by badge screen (exited detail)
             self._menu.back()
             return
         if self._state != State.IDLE:
@@ -605,6 +631,10 @@ class StateMachine:
         if self._menu.is_open:
             if self._menu.in_screen and self._menu.current_item == MenuItem.VOLUME:
                 self._volume.decrease()
+            elif self._menu.in_screen and self._menu.current_item == MenuItem.COOKBOOK:
+                self._display._menu_renderer.cookbook_screen.prev_page()
+            elif self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
+                self._display._menu_renderer.badge_screen.prev_selection()
             else:
                 self._menu.prev_item()
             return
@@ -709,6 +739,8 @@ class StateMachine:
             self._offline_engine = None
         self._offline = False
         self._set_state(State.IDLE)
+        # Fetch badges from REST API on connect
+        self._pet_handler.fetch_badges(config.ROBOT_ID)
 
     def _on_asr_result(self, text, confidence):
         log.info("ASR: '%s' (conf=%.2f)", text, confidence)
@@ -997,7 +1029,9 @@ class StateMachine:
         done = self._display.render(
             render_tick, pet_snapshot, text, self._badge_popup, self._food_mgr,
             menu=self._menu, food_inventory=self._food_inventory,
+            food_journal=self._food_journal,
             volume_pct=self._volume.volume,
+            badges_data=self._pet_handler.badges_cache,
         )
 
         # SFX ducking: reduce SFX volume during TTS playback
