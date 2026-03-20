@@ -57,8 +57,23 @@ OfflineGameEngine = _engine_mod.OfflineGameEngine
 _wifi_mod = importlib.import_module("hardware.wifi-manager")
 WifiManager = _wifi_mod.WifiManager
 
+_vol_mod = importlib.import_module("audio.volume-control")
+VolumeControl = _vol_mod.VolumeControl
+
 _battery_mod = importlib.import_module("hardware.battery-monitor")
 BatteryMonitor = _battery_mod.BatteryMonitor
+
+_food_inv_mod = importlib.import_module("state.food-inventory-manager")
+FoodInventoryManager = _food_inv_mod.FoodInventoryManager
+
+_menu_ctrl_mod = importlib.import_module("state.menu-overlay-controller")
+MenuOverlayController = _menu_ctrl_mod.MenuOverlayController
+MenuItem = _menu_ctrl_mod.MenuItem
+
+_mg_ctrl_mod = importlib.import_module("state.mini-game-controller")
+MiniGameController = _mg_ctrl_mod.MiniGameController
+_mg_rend_mod = importlib.import_module("state.mini-game-renderer")
+MiniGameRenderer = _mg_rend_mod.MiniGameRenderer
 
 
 class State(enum.Enum):
@@ -69,6 +84,7 @@ class State(enum.Enum):
     EMOTION = "emotion"
     OFFLINE = "offline"
     EVOLUTION = "evolution"  # black screen flash → hold new form until button
+    MINI_GAME = "mini_game"  # food catcher arcade game (full-screen replacement)
 
 
 # Map conversation state -> pet animation name
@@ -111,13 +127,20 @@ class StateMachine:
         self._pet_state = PetState()
         self._pet_lock = threading.Lock()
 
-        # Camera: double-press detection (guarded by _press_lock)
+        # Main button tap tracking (limit switch: each physical press = one edge)
         self._camera = None
-        self._last_press_time = 0.0
-        self._press_pending = False  # True = waiting to see if double-press
-        self._press_timer = None
-        self._press_start_time = 0.0  # for long-press detection
-        self._press_lock = threading.Lock()
+        self._tap_count = 0
+        self._tap_lock = threading.Lock()
+        self._tap_timer = None  # pending Timer for tap resolution
+        self._last_tap_time = 0.0  # debounce: ignore edges within this window
+
+        # Shutdown flow: warning → 5s countdown → confirm/cancel
+        self._shutdown_pending = False
+        self._shutdown_deadline = 0.0
+        self._shutdown_warning_time = 0.0  # debounce against GPIO bounce
+
+        # Quest trigger cooldown
+        self._last_quest_trigger = 0.0
         self._vision = None
         self._wifi_manager = WifiManager(config.WIFI_PROFILES_PATH)
         if config.CAMERA_ENABLED:
@@ -144,6 +167,22 @@ class StateMachine:
             self._sfx, self._badge_popup, self._food_mgr, self._ws,
         )
 
+        # Food inventory (persistent JSON storage)
+        self._food_inventory = FoodInventoryManager()
+
+        # Food journal (cookbook collection — permanent record of discovered foods)
+        _journal_mod = importlib.import_module("state.food-journal-manager")
+        FoodJournalManager = _journal_mod.FoodJournalManager
+        self._food_journal = FoodJournalManager()
+
+        # Menu overlay controller
+        self._menu = MenuOverlayController()
+
+        # Mini-game (Food Catcher) — initialized on demand
+        self._mini_game_ctrl = None
+        self._mini_game_renderer = None
+        self._volume = VolumeControl()
+
         # Offline gameplay components
         self._offline_journal = OfflineEventJournal()
         self._offline_response_bank = OfflineResponseBank()
@@ -154,6 +193,7 @@ class StateMachine:
         self._last_activity = time.time()
         self._backlight_dimmed = False
         self._in_standby = False
+        self._pending_quick_feed = False  # GPIO thread sets True, main loop processes
         self._last_battery_refresh = 0.0  # epoch 0 triggers first refresh immediately
 
         # Battery monitor (Waveshare UPS HAT C / INA219 at 0x43)
@@ -173,6 +213,15 @@ class StateMachine:
     def _register_callbacks(self):
         self._hat.on_button_press(self._on_button_press)
         self._hat.on_button_release(self._on_button_release)
+        # Extra buttons A-D: placeholder callbacks (log only)
+        self._hat.on_button_a_press(self._on_button_a_press)
+        self._hat.on_button_a_release(self._on_button_a_release)
+        self._hat.on_button_b_press(self._on_button_b_press)
+        self._hat.on_button_b_release(self._on_button_b_release)
+        self._hat.on_button_c_press(self._on_button_c_press)
+        self._hat.on_button_c_release(self._on_button_c_release)
+        self._hat.on_button_d_press(self._on_button_d_press)
+        self._hat.on_button_d_release(self._on_button_d_release)
         self._ws.on_hello_ack = self._on_hello_ack
         self._ws.on_asr_result = self._on_asr_result
         self._ws.on_llm_stream = self._on_llm_stream
@@ -197,12 +246,15 @@ class StateMachine:
         self._ws.on_quest_start = self._pet_handler.on_quest_start
         self._ws.on_location_changed = self._pet_handler.on_location_changed
         self._ws.on_sync_result = self._on_sync_result
+        self._ws.on_mini_game_ready = self._on_mini_game_ready
+        self._ws.on_mini_game_reward = self._on_mini_game_reward
 
     _LED_MAP = {
         State.IDLE: config.LED_IDLE, State.LISTENING: config.LED_LISTENING,
         State.ASR: config.LED_ASR, State.ANSWER: config.LED_ANSWER,
         State.EMOTION: config.LED_EMOTION_HAPPY, State.OFFLINE: config.LED_OFFLINE,
         State.EVOLUTION: (160, 0, 220),  # purple during evolution
+        State.MINI_GAME: config.LED_MINI_GAME,
     }
 
     def _set_state(self, new_state):
@@ -232,69 +284,109 @@ class StateMachine:
             self._capture.stop()
 
     def _on_button_press(self):
-        self._notify_activity()  # any button press resets backlight dim timer
-        with self._press_lock:
-            self._press_start_time = time.time()
+        """Main button edge (press direction) — route to unified tap handler."""
+        self._on_main_tap()
 
+    def _on_main_tap(self):
+        """Unified handler for main button limit switch.
+
+        Each physical press produces one GPIO edge (alternating press/release).
+        We treat every edge as a 'tap' and use tap counting for shutdown.
+        - Single tap: menu toggle / action
+        - 3 taps within 2s: shutdown warning
+        """
+        now = time.time()
+        self._notify_activity()
+
+        # Debounce: ignore edges within 200ms of last tap (limit switch bounce)
+        if now - self._last_tap_time < 0.2:
+            return
+        self._last_tap_time = now
+
+        # During shutdown countdown: tap = confirm shutdown
+        if self._shutdown_pending:
+            if now - self._shutdown_warning_time >= 0.5:
+                self._confirm_shutdown()
+            return
+
+        # Evolution: tap dismisses hold phase
+        if self._state == State.EVOLUTION and self._evolution_holding:
+            self._pet_handler.end_evolution()
+            self._display.clear_black_background()
+            self._set_state(State.IDLE)
+            return
         if self._state == State.EVOLUTION:
-            if self._evolution_holding:
-                # Exit evolution: restore background and go idle
-                self._pet_handler.end_evolution()
-                self._display.clear_black_background()
-                self._set_state(State.IDLE)
-            # During flash phase, ignore button (don't cut the animation short)
             return
 
-        if self._state == State.ANSWER:
-            self._interrupt()
-            self._conversation_mode = False
+        # Mini-game: ignore main button taps
+        if self._state == State.MINI_GAME:
             return
 
-        # Button during LISTENING in conversation mode: stop & send, exit conversation
-        if self._state == State.LISTENING:
-            self._conversation_mode = False
-            self._stop_listening()
-            return
+        # Track taps: cancel previous timer, increment count, start new timer
+        with self._tap_lock:
+            self._tap_count += 1
+            if self._tap_timer is not None:
+                self._tap_timer.cancel()
+            count_snapshot = self._tap_count
+            # After 500ms of no new taps, resolve the tap sequence
+            self._tap_timer = threading.Timer(0.5, self._resolve_taps, args=[count_snapshot])
+            self._tap_timer.daemon = True
+            self._tap_timer.start()
 
-        if self._state != State.IDLE:
-            return
+        # Immediate triple-tap: don't wait for timer
+        if count_snapshot >= 3:
+            with self._tap_lock:
+                self._tap_timer.cancel()
+                self._tap_count = 0
+                self._tap_timer = None
+            self._enter_shutdown_warning()
 
-        with self._press_lock:
-            now = time.time()
-            elapsed_ms = (now - self._last_press_time) * 1000
-            self._last_press_time = now
-
-            # Double-press detected
-            if self._press_pending and elapsed_ms < config.CAMERA_DOUBLE_PRESS_MS:
-                self._press_pending = False
-                if self._press_timer:
-                    self._press_timer.cancel()
-                    self._press_timer = None
-                if self._offline and self._offline_engine:
-                    self._offline_engine.on_feed()
-                    self._sfx.play("eat")
-                else:
-                    self._trigger_camera()
+    def _resolve_taps(self, count):
+        """Called 500ms after the last tap — execute action based on tap count."""
+        with self._tap_lock:
+            # Stale timer: more taps arrived since this timer was scheduled
+            if self._tap_count != count:
                 return
+            self._tap_count = 0
+            self._tap_timer = None
+        log.debug("Tap sequence resolved: %d tap(s)", count)
+        if count >= 3:
+            self._enter_shutdown_warning()
+        elif count == 2 and self._offline:
+            self._trigger_wifi_qr_scan()
+        else:
+            self._toggle_menu()
 
-            # First press -> wait to see if double-press follows
-            self._press_pending = True
-            delay_s = config.CAMERA_DOUBLE_PRESS_MS / 1000.0
-            self._press_timer = threading.Timer(delay_s, self._on_single_press_confirmed)
-            self._press_timer.daemon = True
-            self._press_timer.start()
+    # --- Shutdown flow ---
 
-    def _on_single_press_confirmed(self):
-        """Called after double-press window expires -> treat as single press (talk)."""
-        with self._press_lock:
-            self._press_pending = False
-            self._press_timer = None
-        if self._state in (State.IDLE, State.OFFLINE):
-            if self._offline and self._offline_engine:
-                self._offline_engine.on_interaction()
-            elif not self._offline:
-                self._conversation_mode = True
-                self._start_listening()
+    def _enter_shutdown_warning(self):
+        """Triple-tap detected: show warning, start 5s countdown."""
+        log.warning("Shutdown warning triggered (triple-tap)")
+        self._shutdown_pending = True
+        now = time.time()
+        self._shutdown_deadline = now + 5.0
+        self._shutdown_warning_time = now
+        self._hat.set_rgb(255, 0, 0)
+        self._last_bubble_text = "Tắt máy? Nhấn thêm lần nữa để tắt, bấm A để hủy. (5s)"
+
+    def _confirm_shutdown(self):
+        """Main button pressed again during countdown = immediate shutdown."""
+        log.warning("Shutdown confirmed by user")
+        self._display.render_shutdown_screen()
+        import subprocess
+        subprocess.Popen(["sudo", "shutdown", "-h", "now"])
+
+    def _cancel_shutdown(self):
+        """Button A pressed during countdown = cancel."""
+        log.info("Shutdown cancelled")
+        self._shutdown_pending = False
+        self._hat.set_rgb_tuple(self._LED_MAP.get(self._state, config.LED_IDLE))
+        self._last_bubble_text = "Đã hủy tắt máy."
+
+    def _check_shutdown_countdown(self):
+        """Called in main loop tick: auto-shutdown if deadline passed."""
+        if self._shutdown_pending and time.time() >= self._shutdown_deadline:
+            self._confirm_shutdown()
 
     def _trigger_camera(self):
         """Capture photo and analyze directly via Gemini on Pi."""
@@ -307,7 +399,9 @@ class StateMachine:
             return
 
         self._hat.set_rgb_tuple(config.LED_CAMERA)
-        log.info("Camera capture triggered (double-press)")
+        self._sfx.play("shutter")
+        self._display.trigger_camera_flash()
+        log.info("Camera capture triggered (Button B)")
 
         def _capture_and_analyze():
             try:
@@ -327,23 +421,30 @@ class StateMachine:
                     sprite_key = result.get("sprite_key", "default")
                     log.info("Food detected: %s (sprite=%s)", food, sprite_key)
 
-                    with self._pet_lock:
-                        hunger = self._pet_state.hunger
+                    # Store in inventory instead of immediate feed
+                    self._food_inventory.add(food, sprite_key)
+                    self._food_mgr.add(sprite_key, food, eat_immediately=False)
+                    self._sfx.play("collect")
 
-                    if hunger > 0:
-                        # Pet is hungry — eat immediately
-                        self._food_mgr.add(sprite_key, food, eat_immediately=True)
-                        self._last_bubble_text = food + " ngon quá! Cho mình ăn nhé?"
-                        self._ws.send_feed_confirm(food, sprite_key)
-                        self._sfx.play("eat")
+                    # Record in food journal (cookbook collection)
+                    is_new = self._food_journal.record(food, sprite_key)
+                    if is_new:
+                        count = self._food_journal.unique_count()
+                        self._last_bubble_text = f"Món mới! {food} ({count} món)"
+                        # Notify backend for badge tracking
+                        if not self._offline and self._ws:
+                            self._ws.send_pet_action("unique_food")
                     else:
-                        # Pet is full — store food on screen
-                        self._food_mgr.add(sprite_key, food, eat_immediately=False)
-                        self._last_bubble_text = "Mình no rồi! Để dành ăn sau nhé~"
+                        self._last_bubble_text = f"{food} - đã lưu vào kho!"
                 else:
                     desc = result.get("description", "")
                     log.info("Non-food: %s", desc)
-                    self._last_bubble_text = desc
+                    if desc and not self._offline:
+                        self._last_bubble_text = f"Thấy: {desc}"
+                        self._ws.send_vision_describe(desc)
+                        self._set_state(State.ANSWER)
+                    else:
+                        self._last_bubble_text = desc or "Mình không nhận ra đây là gì!"
             finally:
                 self._hat.set_rgb_tuple(config.LED_IDLE)
 
@@ -412,20 +513,165 @@ class StateMachine:
 
         threading.Thread(target=_scan_loop, daemon=True).start()
 
+    # --- Button release (main) ---
+
     def _on_button_release(self):
-        # Long-press detection: WiFi QR scan (offline only)
-        is_long = False
-        if self._offline:
-            with self._press_lock:
-                hold_ms = (time.time() - self._press_start_time) * 1000
-                if self._press_start_time > 0 and hold_ms >= config.LONG_PRESS_THRESHOLD_MS:
-                    is_long = True
-                    self._press_pending = False
-                    if self._press_timer:
-                        self._press_timer.cancel()
-                        self._press_timer = None
-        if is_long:
-            self._trigger_wifi_qr_scan()
+        """Main button edge (release direction) — route to unified tap handler."""
+        self._on_main_tap()
+
+    def _toggle_menu(self):
+        """Toggle menu overlay on/off."""
+        self._menu.toggle()
+        log.info("Menu toggled: is_open=%s", self._menu.is_open)
+
+    # --- Button A: Talk (conversation toggle) ---
+
+    def _on_button_a_press(self):
+        self._notify_activity()
+        log.info("Button A pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
+        if self._state == State.MINI_GAME and self._mini_game_ctrl:
+            self._mini_game_ctrl.on_button_a()
+            return
+        if self._menu.is_open:
+            if self._menu.in_screen and self._menu.current_item == MenuItem.VOLUME:
+                self._volume.increase()
+            elif self._menu.in_screen and self._menu.current_item == MenuItem.COOKBOOK:
+                self._display._menu_renderer.cookbook_screen.next_page()
+            elif self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
+                self._display._menu_renderer.badge_screen.next_selection()
+            else:
+                self._menu.next_item()
+            return
+        # Shutdown pending: A = cancel
+        if self._shutdown_pending:
+            self._cancel_shutdown()
+            return
+        if self._state == State.ANSWER:
+            self._interrupt()
+            self._conversation_mode = False
+            return
+        if self._state == State.LISTENING:
+            # Manual stop: keep conversation mode so pet answers then auto-resumes
+            self._stop_listening()
+            return
+        if self._state == State.IDLE and not self._offline:
+            self._conversation_mode = True
+            self._start_listening()
+        elif self._offline and self._offline_engine:
+            self._offline_engine.on_interaction()
+
+    def _on_button_a_release(self):
+        pass
+
+    # --- Button B: Camera capture ---
+
+    def _on_button_b_press(self):
+        self._notify_activity()
+        log.info("Button B pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
+        if self._state == State.MINI_GAME and self._mini_game_ctrl:
+            result = self._mini_game_ctrl.on_button_b()
+            if result == "exit":
+                self._exit_mini_game()
+            return
+        if self._menu.is_open:
+            if self._menu.current_item == MenuItem.MINI_GAME and not self._menu.in_screen:
+                self._menu.toggle()  # close menu
+                self._enter_mini_game()
+                return
+            if self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
+                self._display._menu_renderer.badge_screen.toggle_detail()
+                return
+            self._menu.enter()
+            return
+        if self._state != State.IDLE:
+            return
+        if self._offline and self._offline_engine:
+            self._offline_engine.on_feed()
+            self._sfx.play("eat")
+        else:
+            self._trigger_camera()
+
+    def _on_button_b_release(self):
+        pass
+
+    # --- Button C: Quick-feed from inventory ---
+
+    def _on_button_c_press(self):
+        self._notify_activity()
+        log.info("Button C pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
+        if self._state == State.MINI_GAME and self._mini_game_ctrl:
+            result = self._mini_game_ctrl.on_button_c()
+            if result == "exit":
+                self._exit_mini_game()
+            return
+        if self._menu.is_open:
+            # Badge detail mode: C goes back to grid first
+            if self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
+                if not self._display._menu_renderer.badge_screen.back():
+                    return  # handled by badge screen (exited detail)
+            self._menu.back()
+            return
+        if self._state != State.IDLE:
+            return
+        # Queue for main loop — pygame operations (image load, smoothscale)
+        # are not thread-safe and crash when called from GPIO callback thread.
+        self._pending_quick_feed = True
+
+    def _on_button_c_release(self):
+        pass
+
+    # --- Button D: Quest trigger / menu prev ---
+
+    def _on_button_d_press(self):
+        self._notify_activity()
+        log.info("Button D pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
+        if self._state == State.MINI_GAME and self._mini_game_ctrl:
+            self._mini_game_ctrl.on_button_d()
+            return
+        if self._menu.is_open:
+            if self._menu.in_screen and self._menu.current_item == MenuItem.VOLUME:
+                self._volume.decrease()
+            elif self._menu.in_screen and self._menu.current_item == MenuItem.COOKBOOK:
+                self._display._menu_renderer.cookbook_screen.prev_page()
+            elif self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
+                self._display._menu_renderer.badge_screen.prev_selection()
+            else:
+                self._menu.prev_item()
+            return
+        if self._state != State.IDLE or self._offline:
+            return
+        # Check cooldown
+        now = time.time()
+        if now - self._last_quest_trigger < config.QUEST_TRIGGER_COOLDOWN_S:
+            return
+        # Clear active quest so new one replaces it
+        if self._pet_handler.quest_text:
+            self._pet_handler.clear_quest()
+        self._last_quest_trigger = now
+        self._hat.set_rgb_tuple(config.LED_QUEST)
+        self._last_bubble_text = "Dang tim quest..."
+        self._ws.send_quest_trigger()
+        # Reset LED after brief flash
+        def _reset_led():
+            time.sleep(0.5)
+            self._hat.set_rgb_tuple(self._LED_MAP.get(self._state, config.LED_IDLE))
+        threading.Thread(target=_reset_led, daemon=True).start()
+
+    def _on_button_d_release(self):
+        pass
+
+    # --- Quick-feed from inventory (Phase 03) ---
+
+    def _quick_feed_from_inventory(self):
+        """Pop oldest food from inventory and feed to pet."""
+        item = self._food_inventory.pop()
+        if not item:
+            self._last_bubble_text = "Kho trong, chup anh de them do an!"
+            return
+        self._food_mgr.add(item["sprite_key"], item["food_name"], eat_immediately=True)
+        self._ws.send_feed_confirm(item["food_name"], item["sprite_key"])
+        self._sfx.play("eat")
+        self._last_bubble_text = f"Cho an {item['food_name']}!"
 
     def _start_listening(self):
         self._set_state(State.LISTENING)
@@ -450,11 +696,12 @@ class StateMachine:
         if self._state != State.LISTENING:
             return
         log.info("VAD triggered: %s (has_speech=%s)", vad_result.value, has_speech)
-        # If max duration with no meaningful speech in conversation mode, exit quietly
         _vad_mod = importlib.import_module("audio.voice-activity-detector")
-        if vad_result == _vad_mod.VadResult.MAX_DURATION and self._conversation_mode:
-            if not has_speech:
-                log.info("Conversation idle timeout — no speech, exiting conversation mode")
+        # No meaningful speech — return to idle quietly
+        if not has_speech:
+            if vad_result in (_vad_mod.VadResult.MAX_DURATION,
+                              _vad_mod.VadResult.INSUFFICIENT_SPEECH):
+                log.info("No speech detected, returning to idle")
                 self._conversation_mode = False
                 self._capture.stop()
                 self._set_state(State.IDLE)
@@ -492,6 +739,8 @@ class StateMachine:
             self._offline_engine = None
         self._offline = False
         self._set_state(State.IDLE)
+        # Fetch badges from REST API on connect
+        self._pet_handler.fetch_badges(config.ROBOT_ID)
 
     def _on_asr_result(self, text, confidence):
         log.info("ASR: '%s' (conf=%.2f)", text, confidence)
@@ -500,11 +749,9 @@ class StateMachine:
             self._set_state(State.ANSWER)
             self._playback.start()
         else:
-            log.info("Empty ASR result, returning to IDLE")
+            log.info("Empty ASR result, exiting conversation mode")
+            self._conversation_mode = False
             self._set_state(State.IDLE)
-            # In conversation mode, auto-resume even on empty ASR
-            if self._conversation_mode:
-                threading.Thread(target=self._auto_resume_listening, daemon=True).start()
 
     def _on_llm_stream(self, token, done):
         if self._state in (State.ASR, State.ANSWER):
@@ -522,9 +769,19 @@ class StateMachine:
             self._playback.enqueue(pcm_bytes)
 
     def _on_tts_stop(self, has_more):
-        pass
+        # When no more TTS sentences and turn_end hasn't arrived yet, start watchdog
+        if not has_more and not self._finishing_turn:
+            threading.Thread(target=self._turn_end_watchdog, daemon=True).start()
+
+    def _turn_end_watchdog(self):
+        """Safety net: if turn_end never arrives, force transition after playback drains."""
+        time.sleep(2.0)  # give backend time to send turn_end
+        if self._state in (State.ASR, State.ANSWER) and not self._finishing_turn:
+            log.warning("turn_end not received, forcing finish after playback drain")
+            self._on_turn_end("watchdog")
 
     def _on_turn_end(self, turn_id):
+        log.info("turn_end received (state=%s, turn_id=%s)", self._state.value, turn_id)
         if self._state not in (State.ASR, State.ANSWER):
             return
         duration_ms = int((time.time() - self._turn_start_time) * 1000)
@@ -577,13 +834,20 @@ class StateMachine:
         pass
 
     def _on_pet_feed_result(self, success, food_name, hunger_reduction):
-        """Handle feed result after camera food confirmation."""
+        """Handle feed result after camera food confirmation.
+
+        Called from WS receive thread — must not reset _emotion_tick if EMOTION
+        is already active (would reset the exit-timeout counter and loop forever).
+        """
         if success:
             log.info("Fed with %s (hunger -%d)", food_name, hunger_reduction)
-            # Use "eating" as the emotion so _set_state(EMOTION) picks it up
-            self._current_emotion = "eating"
-            self._emotion_tick = 0
-            self._set_state(State.EMOTION)
+            # Only start a fresh EMOTION cycle if we are not already in one.
+            # Re-entrancy from WS thread would reset _emotion_tick to 0, making
+            # the 150-tick exit timeout restart indefinitely (permanent freeze).
+            if self._state != State.EMOTION:
+                self._current_emotion = "eating"
+                self._emotion_tick = 0
+                self._set_state(State.EMOTION)
         else:
             log.warning("Feed failed for %s", food_name)
 
@@ -673,6 +937,14 @@ class StateMachine:
     def tick(self):
         """Called once per frame (adaptive FPS). Updates display for current state."""
         self._tick += 1
+
+        # Process queued quick-feed on main thread (pygame ops not thread-safe)
+        if self._pending_quick_feed and self._state == State.IDLE:
+            self._pending_quick_feed = False
+            self._quick_feed_from_inventory()
+
+        # Shutdown countdown check
+        self._check_shutdown_countdown()
         # Backlight dim / standby check every ~1s
         if self._tick % 10 == 0:
             self._check_backlight_dim()
@@ -690,6 +962,10 @@ class StateMachine:
 
         if state == State.EVOLUTION:
             self._tick_evolution()
+            return
+
+        if state == State.MINI_GAME:
+            self._tick_mini_game()
             return
 
         if state == State.EMOTION:
@@ -750,7 +1026,13 @@ class StateMachine:
         # Advance food sprite tweens
         self._food_mgr.tick()
 
-        done = self._display.render(render_tick, pet_snapshot, text, self._badge_popup, self._food_mgr)
+        done = self._display.render(
+            render_tick, pet_snapshot, text, self._badge_popup, self._food_mgr,
+            menu=self._menu, food_inventory=self._food_inventory,
+            food_journal=self._food_journal,
+            volume_pct=self._volume.volume,
+            badges_data=self._pet_handler.badges_cache,
+        )
 
         # SFX ducking: reduce SFX volume during TTS playback
         if self._playback.is_playing():
@@ -761,10 +1043,19 @@ class StateMachine:
         # Return to IDLE when emotion animation completes or after 3s timeout
         # (In conversation mode, _finish_turn_after_playback handles EMOTION→IDLE transition)
         if state == State.EMOTION and not self._conversation_mode:
-            # Eating: play eating anim for ~3s, then switch to happy for remainder
+            # Eating: play eating anim for ~3s, then return directly to IDLE.
+            # Previously this only switched _current_emotion to "happy" without
+            # exiting EMOTION — the elif below then needed another tick >= 150
+            # to fire, but since happy is a looping anim (done=False) the only
+            # exit was tick > 150. For pet stages without an "eating" animation
+            # (e.g. adult form) sprite-sheet falls back to idle (looping,
+            # done=False forever), so the timeout at >150 was the ONLY exit.
+            # That is fine under normal conditions but any reset of _emotion_tick
+            # from the WS thread (re-entrant feed result) would loop forever.
+            # Fix: exit EMOTION directly after eating display period.
             if self._current_emotion == "eating" and self._emotion_tick >= 90:
                 self._current_emotion = "happy"
-                self._pet_state.animation = "happy"
+                self._set_state(State.IDLE)
             elif (done and self._emotion_tick >= 60) or self._emotion_tick > 150:
                 self._current_emotion = "happy"  # restore default emotion
                 self._set_state(State.IDLE)
@@ -833,6 +1124,75 @@ class StateMachine:
 
             self._display.render(self._evolution_tick, pet_snapshot, None, None)
 
+    # --- Mini-game (Food Catcher) ---
+
+    def _enter_mini_game(self):
+        """Initialize and start the Food Catcher mini-game."""
+        _obj = importlib.import_module("state.mini-game-objects")
+        _item_size = _obj.ITEM_SIZE
+
+        def _load_mini_sprite(key):
+            surf = self._food_mgr._load_sprite(key)
+            return pygame.transform.scale(surf, (_item_size, _item_size))
+
+        self._mini_game_ctrl = MiniGameController(
+            ws_send_fn=lambda msg: self._ws.send_mini_game_msg(msg),
+            load_sprite_fn=_load_mini_sprite,
+        )
+        # Get Mon sprite for player (idle, south-facing, scaled to player size)
+        with self._pet_lock:
+            stage = self._pet_state.stage
+        mon_frame, _ = self._display._compositor._sprite_mgr.get_frame(
+            stage, "idle", 0, "south"
+        )
+        self._mini_game_renderer = MiniGameRenderer(
+            controller=self._mini_game_ctrl,
+            font=self._display.font,
+            player_sprite=mon_frame,
+            sprite_mgr=self._display._compositor._sprite_mgr,
+            stage=stage,
+        )
+        self._set_state(State.MINI_GAME)
+        self._mini_game_ctrl.start()
+        log.info("Entered mini-game")
+
+    def _exit_mini_game(self):
+        """Clean up and return to IDLE."""
+        self._mini_game_ctrl = None
+        self._mini_game_renderer = None
+        self._set_state(State.IDLE)
+        log.info("Exited mini-game")
+
+    def _tick_mini_game(self):
+        """Advance mini-game controller and render."""
+        if self._mini_game_ctrl:
+            # Hold-to-move: poll GPIO pin state each frame
+            a_held = self._hat.button_a_pressed()
+            d_held = self._hat.button_d_pressed()
+            self._mini_game_ctrl.poll_buttons(a_held, d_held)
+            self._mini_game_ctrl.tick()
+        if self._mini_game_renderer:
+            self._display.render_mini_game(self._mini_game_renderer)
+
+    def _on_mini_game_ready(self, msg):
+        """Handle mini_game_ready WS response."""
+        if self._mini_game_ctrl:
+            self._mini_game_ctrl.on_game_ready(
+                success=msg.get("success", False),
+                reason=msg.get("reason"),
+            )
+
+    def _on_mini_game_reward(self, msg):
+        """Handle mini_game_reward WS response."""
+        if self._mini_game_ctrl:
+            cotton_candy = msg.get("cotton_candy", 0)
+            self._mini_game_ctrl.on_reward(cotton_candy)
+            # Add cotton candy to frontend JSON inventory
+            if cotton_candy > 0:
+                for _ in range(cotton_candy):
+                    self._food_inventory.add("cotton-candy", "cotton-candy")
+                log.info("Added %d cotton candy to inventory", cotton_candy)
+
     def update_pet_state(self, **kwargs):
         """Update pet state from backend pet_status messages (thread-safe).
 
@@ -874,7 +1234,9 @@ class StateMachine:
         """Return LCD_FPS_STANDBY in standby, LCD_FPS_IDLE during IDLE/OFFLINE, LCD_FPS otherwise."""
         if self._in_standby:
             return config.LCD_FPS_STANDBY
-        return config.LCD_FPS_IDLE if self._state in (State.IDLE, State.OFFLINE) else config.LCD_FPS
+        if self._state in (State.IDLE, State.OFFLINE):
+            return config.LCD_FPS_IDLE
+        return config.LCD_FPS
 
     @property
     def state(self):

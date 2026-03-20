@@ -50,6 +50,8 @@ class WSClient:
         self.on_quest_start = None
         self.on_sync_result = None
         self.on_location_changed = None
+        self.on_mini_game_ready = None
+        self.on_mini_game_reward = None
 
     def connect(self):
         url = f"{config.BACKEND_WS_URL}/ws/audio/{config.ROBOT_ID}"
@@ -154,6 +156,14 @@ class WSClient:
         """Confirm feeding after food detection (food analyzed on Pi)."""
         self._send_json({"type": "pet_feed_confirm", "food_name": food_name, "sprite_key": sprite_key})
 
+    def send_quest_trigger(self):
+        """Request a new quest from backend."""
+        self._send_json({"type": "quest_request"})
+
+    def send_vision_describe(self, description: str):
+        """Send non-food vision description to LLM for a conversational response."""
+        self._send_json({"type": "vision_describe", "description": description})
+
     def send_offline_sync(self, events: list, state_snapshot: dict):
         """Send offline events and state snapshot for backend sync."""
         self._send_json({
@@ -161,6 +171,14 @@ class WSClient:
             "events": events,
             "state": state_snapshot,
         })
+
+    def send_pet_action(self, action: str, amount: int = 1):
+        """Send pet action event to backend for badge tracking."""
+        self._send_json({"type": "pet_action", "action": action, "amount": amount})
+
+    def send_mini_game_msg(self, msg: dict):
+        """Send an arbitrary mini-game WS message."""
+        self._send_json(msg)
 
     def send_ping(self):
         self._send_json({"type": "ping"})
@@ -289,6 +307,14 @@ class WSClient:
         elif msg_type == "location_changed":
             if self.on_location_changed:
                 self.on_location_changed(msg)
+
+        elif msg_type == "mini_game_ready":
+            if self.on_mini_game_ready:
+                self.on_mini_game_ready(msg)
+
+        elif msg_type == "mini_game_reward":
+            if self.on_mini_game_reward:
+                self.on_mini_game_reward(msg)
 
         elif msg_type == "pong":
             log.debug("Pong received")

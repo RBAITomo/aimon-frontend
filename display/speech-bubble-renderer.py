@@ -15,6 +15,7 @@ _TEXT_COLOR = (220, 220, 230)
 _BORDER_COLOR = (80, 200, 180)
 _PADDING = 8
 _BORDER_RADIUS = 8
+_TYPEWRITER_CHARS_PER_FRAME = 2  # characters revealed per frame (~60 chars/s at 30fps)
 
 
 class SpeechBubbleRenderer:
@@ -24,6 +25,8 @@ class SpeechBubbleRenderer:
         self._font = pygame.font.SysFont("dejavusans", 16)
         self._line_height = self._font.get_linesize()
         self._scroll_offset = 0
+        self._revealed_chars = 0  # typewriter: how many chars visible so far
+        self._last_text = None  # track text changes to reset typewriter
         # Pre-create alpha surface for bubble background
         self._bubble_surf = pygame.Surface(
             (config.BUBBLE_WIDTH, config.BUBBLE_HEIGHT), pygame.SRCALPHA
@@ -38,7 +41,24 @@ class SpeechBubbleRenderer:
             tick: Current frame tick (unused now, reserved for animations).
         """
         if not text:
+            self._last_text = None
+            self._revealed_chars = 0
             return
+
+        # Reset typewriter when text changes (new message)
+        if text != self._last_text:
+            # If new text starts with old text, keep revealed count (streaming)
+            if self._last_text and text.startswith(self._last_text):
+                pass  # streaming append — keep progress
+            else:
+                self._revealed_chars = 0  # completely new text — restart
+            self._last_text = text
+
+        # Advance typewriter
+        self._revealed_chars = min(
+            self._revealed_chars + _TYPEWRITER_CHARS_PER_FRAME, len(text)
+        )
+        visible_text = text[: self._revealed_chars]
 
         # Draw semi-transparent bubble background
         self._bubble_surf.fill((0, 0, 0, 0))
@@ -54,9 +74,9 @@ class SpeechBubbleRenderer:
         )
         surface.blit(self._bubble_surf, (config.BUBBLE_X, config.BUBBLE_Y))
 
-        # Wrap and render text lines
+        # Wrap and render text lines (only revealed portion)
         max_text_w = config.BUBBLE_WIDTH - _PADDING * 2
-        lines = self._wrap_text(text, max_text_w)
+        lines = self._wrap_text(visible_text, max_text_w)
 
         # Calculate visible area
         visible_h = config.BUBBLE_HEIGHT - _PADDING * 2
@@ -86,8 +106,10 @@ class SpeechBubbleRenderer:
         surface.set_clip(old_clip)
 
     def reset(self):
-        """Reset scroll position (call on state change)."""
+        """Reset scroll and typewriter position (call on state change)."""
         self._scroll_offset = 0
+        self._revealed_chars = 0
+        self._last_text = None
 
     def _wrap_text(self, text, max_width):
         """Word-wrap text to fit within max_width pixels."""

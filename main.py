@@ -93,7 +93,10 @@ def main():
                     running = False
 
             # State machine tick: updates display + handles timeouts
-            sm.tick()
+            try:
+                sm.tick()
+            except Exception:
+                log.exception("Unhandled error in tick (skipping frame)")
 
             # Adaptive FPS: 10fps in IDLE to reduce CPU load, 30fps when active
             clock.tick(sm.target_fps)

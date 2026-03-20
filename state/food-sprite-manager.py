@@ -27,11 +27,12 @@ class FoodItem:
     surface: pygame.Surface = field(repr=False)
     x: float = 0.0
     y: float = 0.0
-    state: str = "idle"  # idle | tweening | done
+    state: str = "idle"  # idle | popup | fadeout | tweening | done
     tween_tick: int = 0
     tween_start_x: float = 0.0
     tween_start_y: float = 0.0
     slot_index: int = -1
+    popup_tick: int = 0  # counts up during popup/fadeout phases
 
 
 class FoodSpriteManager:
@@ -74,10 +75,24 @@ class FoodSpriteManager:
         return 0  # fallback
 
     def add(self, sprite_key: str, food_name: str, eat_immediately: bool = False) -> FoodItem:
-        """Add a food item. If eat_immediately, start tween to pet center."""
+        """Add a food item.
+
+        eat_immediately=True: tween to pet center (feeding animation).
+        eat_immediately=False: brief popup (2s visible + fade out), then auto-remove.
+        """
         surface = self._load_sprite(sprite_key)
-        slot = self._find_free_slot()
-        sx, sy = config.FOOD_SLOT_POSITIONS[slot]
+        # Place popup items centered above pet, slot items at fixed positions
+        if eat_immediately:
+            slot = self._find_free_slot()
+            sx, sy = config.FOOD_SLOT_POSITIONS[slot]
+            state = "tweening"
+        else:
+            slot = -1
+            # Center on screen for prominent popup
+            popup_size = config.FOOD_POPUP_SPRITE_SIZE
+            sx = (config.LCD_WIDTH - popup_size) // 2
+            sy = (config.LCD_HEIGHT - popup_size) // 2
+            state = "popup"
 
         item = FoodItem(
             sprite_key=sprite_key,
@@ -87,15 +102,14 @@ class FoodSpriteManager:
             slot_index=slot,
             tween_start_x=sx,
             tween_start_y=sy,
+            state=state,
         )
 
         with self._lock:
-            # Evict oldest idle if at max
-            idle_count = sum(1 for it in self._items if it.state == "idle")
-            if idle_count >= config.FOOD_SPRITE_MAX:
-                self._evict_oldest()
             if eat_immediately:
-                item.state = "tweening"
+                idle_count = sum(1 for it in self._items if it.state == "idle")
+                if idle_count >= config.FOOD_SPRITE_MAX:
+                    self._evict_oldest()
                 item.tween_tick = 0
             self._items.append(item)
 
@@ -121,22 +135,29 @@ class FoodSpriteManager:
         return False
 
     def tick(self) -> list[FoodItem]:
-        """Advance tweens. Returns list of items that completed eating this tick."""
+        """Advance animations. Returns list of items that completed eating this tick."""
         completed = []
         with self._lock:
             for item in self._items:
-                if item.state != "tweening":
-                    continue
-                item.tween_tick += 1
-                t = min(item.tween_tick / config.FOOD_TWEEN_FRAMES, 1.0)
-                # Lerp toward pet center
-                tx, ty = config.FOOD_PET_CENTER
-                item.x = item.tween_start_x + (tx - item.tween_start_x) * t
-                item.y = item.tween_start_y + (ty - item.tween_start_y) * t
-                if t >= 1.0:
-                    item.state = "done"
-                    completed.append(item)
-                    log.info("Food tween completed: %s", item.food_name)
+                if item.state == "popup":
+                    item.popup_tick += 1
+                    if item.popup_tick >= config.FOOD_POPUP_FRAMES:
+                        item.state = "fadeout"
+                        item.popup_tick = 0
+                elif item.state == "fadeout":
+                    item.popup_tick += 1
+                    if item.popup_tick >= config.FOOD_FADEOUT_FRAMES:
+                        item.state = "done"
+                elif item.state == "tweening":
+                    item.tween_tick += 1
+                    t = min(item.tween_tick / config.FOOD_TWEEN_FRAMES, 1.0)
+                    tx, ty = config.FOOD_PET_CENTER
+                    item.x = item.tween_start_x + (tx - item.tween_start_x) * t
+                    item.y = item.tween_start_y + (ty - item.tween_start_y) * t
+                    if t >= 1.0:
+                        item.state = "done"
+                        completed.append(item)
+                        log.info("Food tween completed: %s", item.food_name)
             # Remove done items
             self._items = deque(item for item in self._items if item.state != "done")
         return completed
@@ -147,8 +168,35 @@ class FoodSpriteManager:
             for item in self._items:
                 if item.state == "done":
                     continue
-                # Scale down during tween
-                if item.state == "tweening" and config.FOOD_TWEEN_FRAMES > 0:
+
+                if item.state == "popup":
+                    # Pop-in: scale from 0.3 to 1.0 over first 8 frames, then hold
+                    # Uses larger popup sprite size, centered on screen
+                    popup_size = config.FOOD_POPUP_SPRITE_SIZE
+                    pop_t = min(item.popup_tick / 8, 1.0)
+                    scale = 0.3 + 0.7 * pop_t
+                    size = int(popup_size * scale)
+                    if size < 2:
+                        continue
+                    # Re-scale from original cached sprite for quality
+                    scaled = pygame.transform.smoothscale(item.surface, (size, size))
+                    # Center the scaled sprite at screen center
+                    cx = (config.LCD_WIDTH - size) // 2
+                    cy = (config.LCD_HEIGHT - size) // 2
+                    surface.blit(scaled, (cx, cy))
+
+                elif item.state == "fadeout":
+                    # Fade out via alpha, centered on screen
+                    popup_size = config.FOOD_POPUP_SPRITE_SIZE
+                    t = min(item.popup_tick / config.FOOD_FADEOUT_FRAMES, 1.0)
+                    alpha = int(255 * (1.0 - t))
+                    scaled = pygame.transform.smoothscale(item.surface, (popup_size, popup_size))
+                    scaled.set_alpha(alpha)
+                    cx = (config.LCD_WIDTH - popup_size) // 2
+                    cy = (config.LCD_HEIGHT - popup_size) // 2
+                    surface.blit(scaled, (cx, cy))
+
+                elif item.state == "tweening" and config.FOOD_TWEEN_FRAMES > 0:
                     t = min(item.tween_tick / config.FOOD_TWEEN_FRAMES, 1.0)
                     scale = max(1.0 - t * 0.7, 0.3)
                     size = int(config.FOOD_SPRITE_SIZE * scale)
@@ -156,6 +204,7 @@ class FoodSpriteManager:
                         continue
                     scaled = pygame.transform.smoothscale(item.surface, (size, size))
                     surface.blit(scaled, (int(item.x), int(item.y)))
+
                 else:
                     surface.blit(item.surface, (int(item.x), int(item.y)))
 

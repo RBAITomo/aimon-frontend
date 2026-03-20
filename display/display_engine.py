@@ -19,6 +19,9 @@ log = logging.getLogger(__name__)
 _compositor_mod = importlib.import_module("display.layer-compositor")
 LayerCompositor = _compositor_mod.LayerCompositor
 
+_menu_renderer_mod = importlib.import_module("display.menu-overlay-renderer")
+MenuOverlayRenderer = _menu_renderer_mod.MenuOverlayRenderer
+
 # Colors for non-compositor screens
 _COL_BG = (10, 10, 20)
 _COL_DIM = (100, 100, 120)
@@ -38,12 +41,14 @@ class DisplayEngine:
             (config.LCD_WIDTH, config.LCD_HEIGHT), depth=24
         )
         self._compositor = LayerCompositor()
+        self._menu_renderer = MenuOverlayRenderer()
         self._font_large = pygame.font.SysFont("dejavusans", 22)
         self._font_small = pygame.font.SysFont("dejavusans", 16)
+        self._camera_flash_frames = 0  # remaining flash frames
 
         log.info("DisplayEngine initialized (%dx%d)", config.LCD_WIDTH, config.LCD_HEIGHT)
 
-    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None):
+    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None, menu=None, food_inventory=None, food_journal=None, volume_pct=80, badges_data=None):
         """Main render call — delegates to compositor.
 
         Args:
@@ -52,6 +57,8 @@ class DisplayEngine:
             text: Optional speech bubble text.
             badge_popup: Optional BadgePopupRenderer to overlay on top.
             food_mgr: Optional FoodSpriteManager to render food sprites.
+            menu: Optional MenuOverlayController for menu rendering.
+            food_inventory: Optional FoodInventoryManager for inventory screen.
 
         Returns:
             bool: True if current animation finished.
@@ -63,8 +70,27 @@ class DisplayEngine:
             food_mgr.render(self._surface)
         if badge_popup:
             badge_popup.render(self._surface, tick)
+        if menu and menu.is_open:
+            self._menu_renderer.render(self._surface, menu, pet_state=pet_state, food_inventory=food_inventory, food_journal=food_journal, volume_pct=volume_pct, badges_data=badges_data)
+        if self._camera_flash_frames > 0:
+            alpha = int(200 * (self._camera_flash_frames / 4))
+            flash = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT))
+            flash.fill((255, 255, 255))
+            flash.set_alpha(alpha)
+            self._surface.blit(flash, (0, 0))
+            self._camera_flash_frames -= 1
         self._blit_to_lcd()
         return done
+
+    def render_mini_game(self, mini_game_renderer):
+        """Render mini-game frame (full-screen replacement, no compositor)."""
+        mini_game_renderer.render(self._surface)
+        self._blit_to_lcd()
+
+    @property
+    def font(self) -> pygame.font.Font:
+        """Font for mini-game renderer to use."""
+        return self._font_large
 
     def render_offline(self, tick):
         """Render offline/disconnected screen (no compositor)."""
@@ -98,6 +124,10 @@ class DisplayEngine:
             self._draw_centered_text(line, self._font_small, _COL_DIM, y=y)
             y += 22
         self._blit_to_lcd()
+
+    def trigger_camera_flash(self):
+        """Request a white flash overlay for the next few render frames."""
+        self._camera_flash_frames = 4  # ~130ms at 30 FPS
 
     def render_evolution(self, tick, pet_state):
         """Render evolution flash sequence on top of compositor frame.
@@ -149,6 +179,12 @@ class DisplayEngine:
         """Force full redraw on next render (e.g. after standby black screen)."""
         self._compositor.mark_dirty()
 
+    def render_shutdown_screen(self):
+        """Render shutdown confirmation screen."""
+        self._surface.fill((40, 0, 0))
+        self._draw_centered_text("Dang tat may...", self._font_large, (255, 100, 100), y=config.LCD_HEIGHT // 2 - 10)
+        self._blit_to_lcd()
+
     def _draw_centered_text(self, text, font, color, y):
         """Draw horizontally centered text at given y position."""
         surf = font.render(text, True, color)
@@ -159,4 +195,9 @@ class DisplayEngine:
         """Convert Pygame surface to RGB565 and send to LCD via SPI."""
         from hardware.whisplay_hat import surface_to_rgb565
         rgb565_data = surface_to_rgb565(self._surface)
-        self._hat.draw_frame(rgb565_data)
+        try:
+            self._hat.draw_frame(rgb565_data)
+        except Exception as e:  # noqa: BLE001
+            # SPI errors (IOError/OSError) on Pi Zero 2 under heavy load must not
+            # crash the main loop — log and skip this frame.
+            log.warning("LCD blit failed (skipping frame): %s", e)

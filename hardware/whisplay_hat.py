@@ -115,7 +115,7 @@ class WhisplayHAT:
         """ST7789 initialization sequence."""
         self._cmd(0x11)  # Sleep out
         time.sleep(0.12)
-        self._cmd(0x36, 0xC0)  # Memory access: horizontal mode 1
+        self._cmd(0x36, 0x60)  # Memory access: landscape mode (MX=1, MV=1)
         self._cmd(0x3A, 0x05)  # 16-bit color (RGB565)
         self._cmd(0xB2, 0x0C, 0x0C, 0x00, 0x33, 0x33)  # Porch
         self._cmd(0xB7, 0x35)  # Gate
@@ -159,14 +159,14 @@ class WhisplayHAT:
                 self.spi.writebytes(data[i : i + 4096])
 
     def _set_window(self, x0, y0, x1, y1):
-        """Set draw region with 20px corner offset for horizontal mode."""
+        """Set draw region with 20px corner offset on X-axis for landscape mode."""
         off = config.LCD_CORNER_HEIGHT
-        self._cmd(0x2A, x0 >> 8, x0 & 0xFF, x1 >> 8, x1 & 0xFF)
         self._cmd(
-            0x2B,
-            (y0 + off) >> 8, (y0 + off) & 0xFF,
-            (y1 + off) >> 8, (y1 + off) & 0xFF,
+            0x2A,
+            (x0 + off) >> 8, (x0 + off) & 0xFF,
+            (x1 + off) >> 8, (x1 + off) & 0xFF,
         )
+        self._cmd(0x2B, y0 >> 8, y0 & 0xFF, y1 >> 8, y1 & 0xFF)
         self._cmd(0x2C)
 
     def fill_screen(self, color_rgb565):
@@ -235,49 +235,58 @@ class WhisplayHAT:
         """Set RGB LED from (r, g, b) tuple."""
         self.set_rgb(*rgb)
 
-    # ===== Button (GPIO interrupt with polling fallback) =====
+    # ===== Buttons (GPIO interrupt with polling fallback) =====
+
+    # All button configs: (pin, suffix) — suffix used for attribute/method names
+    _BUTTON_CONFIGS = [
+        (config.PIN_BUTTON, ""),      # main button (no suffix)
+        (config.PIN_BUTTON_A, "_a"),
+        (config.PIN_BUTTON_B, "_b"),
+        (config.PIN_BUTTON_C, "_c"),
+        (config.PIN_BUTTON_D, "_d"),
+    ]
 
     def _init_button(self):
-        self._on_press = None
-        self._on_release = None
         self._poll_thread = None
         self._poll_stop = threading.Event()
         self._use_polling = False
 
-        # Clean up pin completely first
-        try:
-            GPIO.remove_event_detect(config.PIN_BUTTON)
-        except Exception:
-            pass
+        # Init callback storage for each button
+        for _pin, suffix in self._BUTTON_CONFIGS:
+            setattr(self, f"_on_press{suffix}", None)
+            setattr(self, f"_on_release{suffix}", None)
 
-        try:
-            GPIO.cleanup(config.PIN_BUTTON)
-        except Exception:
-            pass
+        # Clean up and setup each pin
+        all_pins = [pin for pin, _ in self._BUTTON_CONFIGS]
+        for pin in all_pins:
+            try:
+                GPIO.remove_event_detect(pin)
+            except Exception:
+                pass
+            try:
+                GPIO.cleanup(pin)
+            except Exception:
+                pass
+            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-        # Now setup the pin fresh
-        GPIO.setup(config.PIN_BUTTON, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-        # Try edge detection first; fall back to polling on Bookworm 6.6+ kernels
-        # where sysfs GPIO base was moved to 512 and RPi.GPIO edge detect breaks.
+        # Try edge detection; fall back to polling on Bookworm 6.6+ kernels
         try:
-            GPIO.add_event_detect(
-                config.PIN_BUTTON, GPIO.BOTH,
-                callback=self._button_event, bouncetime=50,
-            )
-            log.info("Button: using GPIO edge detection")
+            for pin, _suffix in self._BUTTON_CONFIGS:
+                GPIO.add_event_detect(
+                    pin, GPIO.BOTH,
+                    callback=self._button_event, bouncetime=50,
+                )
+            log.info("Buttons: using GPIO edge detection (pins %s)", all_pins)
         except RuntimeError:
             log.warning(
                 "GPIO edge detection unavailable (Bookworm kernel 6.6+?). "
-                "Falling back to polling. Consider: "
-                "sudo apt remove python3-rpi.gpio && "
-                "sudo apt install python3-rpi-lgpio"
+                "Falling back to polling."
             )
             self._use_polling = True
             self._start_button_poll()
 
     def _start_button_poll(self):
-        """Start a daemon thread that polls the button pin at ~50ms."""
+        """Start a daemon thread that polls all button pins at ~20ms."""
         self._poll_stop.clear()
         self._poll_thread = threading.Thread(
             target=self._button_poll_loop, daemon=True,
@@ -285,33 +294,49 @@ class WhisplayHAT:
         self._poll_thread.start()
 
     def _button_poll_loop(self):
-        """Poll button state and fire callbacks on transitions.
+        """Poll all button states and fire callbacks on transitions.
 
         Dispatches callbacks in separate threads so slow handlers
-        (e.g. AudioCapture.start) don't block release detection.
+        don't block release detection.
         """
-        prev = GPIO.input(config.PIN_BUTTON)
+        prev = {pin: GPIO.input(pin) for pin, _ in self._BUTTON_CONFIGS}
         while not self._poll_stop.is_set():
-            cur = GPIO.input(config.PIN_BUTTON)
-            if cur != prev:
-                if cur == 0 and self._on_press:
-                    threading.Thread(target=self._on_press, daemon=True).start()
-                elif cur == 1 and self._on_release:
-                    threading.Thread(target=self._on_release, daemon=True).start()
-                prev = cur
-            self._poll_stop.wait(0.02)  # 20ms for responsive press-and-hold
+            for pin, suffix in self._BUTTON_CONFIGS:
+                cur = GPIO.input(pin)
+                if cur != prev[pin]:
+                    if cur == 0:
+                        cb = getattr(self, f"_on_press{suffix}", None)
+                        if cb:
+                            threading.Thread(target=cb, daemon=True).start()
+                    else:
+                        cb = getattr(self, f"_on_release{suffix}", None)
+                        if cb:
+                            threading.Thread(target=cb, daemon=True).start()
+                    prev[pin] = cur
+            self._poll_stop.wait(0.02)
 
     def _button_event(self, channel):
-        """Dispatch press/release based on GPIO level."""
-        if GPIO.input(channel):
-            # Rising edge = button released (pull-up)
-            if self._on_release:
-                self._on_release()
-        else:
-            # Falling edge = button pressed
-            if self._on_press:
-                self._on_press()
+        """Dispatch press/release based on GPIO level for any button.
 
+        A small delay before reading lets contact bounce settle so the
+        level matches the actual physical state, not a transient spike.
+        """
+        time.sleep(0.005)  # 5 ms settle time
+        suffix = ""
+        for pin, s in self._BUTTON_CONFIGS:
+            if pin == channel:
+                suffix = s
+                break
+        if GPIO.input(channel):
+            cb = getattr(self, f"_on_release{suffix}", None)
+            if cb:
+                cb()
+        else:
+            cb = getattr(self, f"_on_press{suffix}", None)
+            if cb:
+                cb()
+
+    # --- Main button API ---
     def on_button_press(self, callback):
         self._on_press = callback
 
@@ -320,6 +345,43 @@ class WhisplayHAT:
 
     def button_pressed(self):
         return GPIO.input(config.PIN_BUTTON) == 0
+
+    # --- Extra button A-D API ---
+    def on_button_a_press(self, callback):
+        self._on_press_a = callback
+
+    def on_button_a_release(self, callback):
+        self._on_release_a = callback
+
+    def button_a_pressed(self):
+        return GPIO.input(config.PIN_BUTTON_A) == 0
+
+    def on_button_b_press(self, callback):
+        self._on_press_b = callback
+
+    def on_button_b_release(self, callback):
+        self._on_release_b = callback
+
+    def button_b_pressed(self):
+        return GPIO.input(config.PIN_BUTTON_B) == 0
+
+    def on_button_c_press(self, callback):
+        self._on_press_c = callback
+
+    def on_button_c_release(self, callback):
+        self._on_release_c = callback
+
+    def button_c_pressed(self):
+        return GPIO.input(config.PIN_BUTTON_C) == 0
+
+    def on_button_d_press(self, callback):
+        self._on_press_d = callback
+
+    def on_button_d_release(self, callback):
+        self._on_release_d = callback
+
+    def button_d_pressed(self):
+        return GPIO.input(config.PIN_BUTTON_D) == 0
 
     # ===== Cleanup =====
 
@@ -331,10 +393,11 @@ class WhisplayHAT:
             if self._poll_thread and self._poll_thread.is_alive():
                 self._poll_thread.join(timeout=1)
         else:
-            try:
-                GPIO.remove_event_detect(config.PIN_BUTTON)
-            except Exception:
-                pass
+            for pin, _ in self._BUTTON_CONFIGS:
+                try:
+                    GPIO.remove_event_detect(pin)
+                except Exception:
+                    pass
 
         try:
             self.set_rgb(0, 0, 0)

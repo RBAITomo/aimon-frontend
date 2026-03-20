@@ -54,6 +54,7 @@ class AudioCapture:
             self._vad_enabled = vad
             self._on_vad_stop = on_vad_stop
             self._vad_fired = False
+            self._insufficient_count = 0
             if vad:
                 self._vad = VoiceActivityDetector(
                     sample_rate=config.AUDIO_SAMPLE_RATE,
@@ -129,7 +130,18 @@ class AudioCapture:
                                     daemon=True,
                                 ).start()
                         elif result == VadResult.INSUFFICIENT_SPEECH:
-                            self._vad.reset()  # noise burst, keep listening
+                            self._insufficient_count += 1
+                            if self._insufficient_count >= 2:
+                                # No real speech after silence cycles — treat as idle
+                                self._vad_fired = True
+                                if self._on_vad_stop:
+                                    threading.Thread(
+                                        target=self._on_vad_stop,
+                                        args=(result, False),
+                                        daemon=True,
+                                    ).start()
+                            else:
+                                self._vad.reset()  # noise burst, keep listening
         except Exception as e:
             log.warning("Audio capture error: %s", e)
 
