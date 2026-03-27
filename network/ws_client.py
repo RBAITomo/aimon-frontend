@@ -127,6 +127,7 @@ class WSClient:
         self._send_json({
             "type": "hello",
             "version": 4,
+            "token": config.AIMON_API_KEY,
             "device_id": config.ROBOT_ID,
             "audio_params": {
                 "format": "pcm16",

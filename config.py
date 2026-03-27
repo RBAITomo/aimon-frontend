@@ -8,6 +8,7 @@ load_dotenv()
 # --- Backend Connection ---
 BACKEND_WS_URL = os.getenv("BACKEND_WS_URL", "ws://localhost:8080")
 ROBOT_ID = os.getenv("ROBOT_ID", "1")  # numeric userId or pet name from pet_profiles
+AIMON_API_KEY = os.getenv("AIMON_API_KEY", "aimon-dev-secret-key")  # must match backend aimon.api-key
 WS_RECONNECT_INTERVAL_S = 2  # deprecated: kept for test compat
 WS_RECONNECT_MAX_ATTEMPTS = 5  # deprecated: replaced by infinite backoff
 WS_PING_INTERVAL_S = 15
