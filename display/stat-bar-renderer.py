@@ -4,6 +4,8 @@ Uses pygame.draw.rect for performance on Pi Zero 2. Pre-renders static
 labels at init to avoid per-frame font rendering.
 """
 
+import os
+
 import pygame
 
 import config
@@ -45,12 +47,20 @@ class StatBarRenderer:
     def __init__(self):
         self._font = pygame.font.SysFont("dejavusans", 10)
         self._level_font = pygame.font.SysFont("dejavusans", 11)
-        # Pre-render stat icons as colored dots (cheaper than text labels)
-        self._icons = {
-            "hunger": _HUNGER_FULL,
-            "energy": _ENERGY_FULL,
-            "happiness": _HAPPINESS_FULL,
-        }
+        # Load stat icons as 10x10 PNG sprites (fallback: colored dot)
+        self._icons = {}
+        for name in ("hunger", "energy", "happiness"):
+            self._icons[name] = self._load_icon(f"icon-stat-{name}.png", 10, 10)
+        self._battery_icon = self._load_icon("icon-battery.png", 20, 14)
+
+    def _load_icon(self, filename, w, h):
+        """Load and scale a PNG icon; returns None if missing or pygame error."""
+        path = os.path.join(config.UI_ASSETS_PATH, filename)
+        try:
+            img = pygame.image.load(path).convert_alpha()
+            return pygame.transform.smoothscale(img, (w, h))
+        except (pygame.error, FileNotFoundError):
+            return None
 
     def render_stat_bars(self, surface, hunger, energy, happiness):
         """Draw 3 horizontal stat bars in the top 24px region.
@@ -75,9 +85,13 @@ class StatBarRenderer:
         bar_h = config.STAT_BAR_THICKNESS
 
         for name, value, full_col, empty_col, invert in stats:
-            # Icon dot
-            icon_col = self._icons[name]
-            pygame.draw.circle(surface, icon_col, (x + 3, y + bar_h // 2), 3)
+            # Icon: PNG sprite or fallback colored dot
+            icon = self._icons.get(name)
+            if icon:
+                surface.blit(icon, (x - 1, y + bar_h // 2 - 5))
+            else:
+                fallback_colors = {"hunger": _HUNGER_FULL, "energy": _ENERGY_FULL, "happiness": _HAPPINESS_FULL}
+                pygame.draw.circle(surface, fallback_colors[name], (x + 3, y + bar_h // 2), 3)
 
             # Background track
             bx = x + 10
@@ -131,6 +145,13 @@ class StatBarRenderer:
             surface: Target surface.
             battery_pct: 0-100 percentage, or -1 if unavailable.
         """
+        if self._battery_icon:
+            # Vertically center 20x14 PNG over 6px body region
+            bx = _BAT_X
+            by = _BAT_Y - (self._battery_icon.get_height() - _BAT_BODY_H) // 2
+            surface.blit(self._battery_icon, (bx, by))
+            return
+
         x, y = _BAT_X, _BAT_Y
 
         # Choose fill color by level

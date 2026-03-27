@@ -198,6 +198,9 @@ COOKBOOK_SPRITE_SIZE = 36
 COOKBOOK_GRID_START_Y = 50
 COOKBOOK_GRID_START_X = 8
 
+# UI assets (icons, map pins, mini-game sprites)
+UI_ASSETS_PATH = os.path.join(os.path.dirname(__file__), "assets", "ui")
+
 # Badge assets
 BADGE_ASSETS_PATH = os.path.join(os.path.dirname(__file__), "assets", "badges")
 BADGE_GRID_COLS = 5

@@ -2,6 +2,7 @@
 
 import importlib
 import logging
+import os
 
 import pygame
 
@@ -30,6 +31,17 @@ VolumeScreenRenderer = _vol_screen_mod.VolumeScreenRenderer
 _cookbook_screen_mod = importlib.import_module("display.cookbook-screen-renderer")
 CookbookScreenRenderer = _cookbook_screen_mod.CookbookScreenRenderer
 
+# Map MenuItem enum values (0-6) to PNG filenames in UI_ASSETS_PATH
+_MENU_ICON_FILES = {
+    0: "icon-menu-pet-status.png",
+    1: "icon-menu-food-inventory.png",
+    2: "icon-menu-badges.png",
+    3: "icon-menu-map.png",
+    4: "icon-menu-volume.png",
+    5: "icon-menu-mini-game.png",
+    6: "icon-menu-cookbook.png",
+}
+
 
 class MenuOverlayRenderer:
     """Renders menu overlay on top of compositor output."""
@@ -38,6 +50,14 @@ class MenuOverlayRenderer:
         self._font = pygame.font.SysFont("dejavusans", config.MENU_LABEL_FONT_SIZE)
         self._font_small = pygame.font.SysFont("dejavusans", 14)
         self._overlay = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT), pygame.SRCALPHA)
+        # Load 32x32 menu icons (native size, no scaling needed)
+        self._menu_icons = {}
+        for val, fname in _MENU_ICON_FILES.items():
+            path = os.path.join(config.UI_ASSETS_PATH, fname)
+            try:
+                self._menu_icons[val] = pygame.image.load(path).convert_alpha()
+            except (pygame.error, FileNotFoundError):
+                self._menu_icons[val] = None
         self._pet_screen = PetStatusScreenRenderer()
         self._inv_screen = InventoryScreenRenderer()
         self._badge_screen = BadgeScreenRenderer()
@@ -75,14 +95,20 @@ class MenuOverlayRenderer:
             self._render_item_select(surface, controller.current_item)
 
     def _render_item_select(self, surface, current_item):
-        """Render item carousel: centered label with navigation hints."""
+        """Render item carousel: icon + label with navigation hints."""
         idx = current_item.value
         name = config.MENU_ITEM_NAMES[idx]
         cx, cy = config.LCD_WIDTH // 2, config.LCD_HEIGHT // 2
 
-        # Draw current item name centered
+        # Draw 32x32 icon centered above text
+        icon = self._menu_icons.get(idx)
+        if icon:
+            surface.blit(icon, (cx - 16, cy - 34))
+
+        # Draw item name below icon (shifted down when icon present)
+        text_y = cy + 4 if icon else cy - self._font.size(name)[1] // 2
         text_surf = self._font.render(name, True, (255, 255, 255))
-        surface.blit(text_surf, (cx - text_surf.get_width() // 2, cy - text_surf.get_height() // 2))
+        surface.blit(text_surf, (cx - text_surf.get_width() // 2, text_y))
 
         # Draw left/right arrows
         arrow_l = self._font.render("<", True, (180, 180, 180))

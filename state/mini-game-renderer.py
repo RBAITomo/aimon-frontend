@@ -57,6 +57,16 @@ class MiniGameRenderer:
             pw = self._ctrl.player.WIDTH
             ph = self._ctrl.player.HEIGHT
             self._player_sprite = pygame.transform.scale(player_sprite, (pw, ph))
+        # Load basket sprite as secondary fallback (when no pet sprite available)
+        self._basket_sprite = None
+        basket_path = os.path.join(config.UI_ASSETS_PATH, "mini-game-basket.png")
+        try:
+            basket_img = pygame.image.load(basket_path).convert_alpha()
+            pw = self._ctrl.player.WIDTH   # 48
+            ph = self._ctrl.player.HEIGHT  # 48
+            self._basket_sprite = pygame.transform.smoothscale(basket_img, (pw, ph))
+        except (pygame.error, FileNotFoundError):
+            log.warning("Basket sprite not found: %s", basket_path)
         # Cache for scaled walking/idle frames
         self._sprite_cache = {}
 
@@ -154,7 +164,7 @@ class MiniGameRenderer:
                 self._sprite_cache[cache_key] = pygame.transform.scale(frame, (pw, ph))
             return self._sprite_cache[cache_key]
 
-        return self._player_sprite
+        return self._player_sprite or self._basket_sprite
 
     def _render_player(self, surface: pygame.Surface):
         player = self._ctrl.player
@@ -166,9 +176,12 @@ class MiniGameRenderer:
         if sprite:
             surface.blit(sprite, (int(player.x), player.y_pos))
         else:
-            # Fallback green rect if sprite unavailable
-            pygame.draw.rect(surface, PLAYER_COLOR,
-                             (int(player.x), player.y_pos, player.WIDTH, player.HEIGHT))
+            # Fallback: basket PNG, or green rect if basket also missing
+            if self._basket_sprite:
+                surface.blit(self._basket_sprite, (int(player.x), player.y_pos))
+            else:
+                pygame.draw.rect(surface, PLAYER_COLOR,
+                                 (int(player.x), player.y_pos, player.WIDTH, player.HEIGHT))
 
     def _render_countdown(self, surface: pygame.Surface):
         num = self._ctrl.countdown_number
