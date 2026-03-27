@@ -234,7 +234,7 @@ class PetEventHandler:
         """Thread-safe read of badge cache for rendering."""
         with self._pet_lock:
             # Use `is not None` — empty list [] is a valid "loaded but no badges" state
-        return list(self._badges_cache) if self._badges_cache is not None else None
+            return list(self._badges_cache) if self._badges_cache is not None else None
 
     def clear_quest(self):
         self._quest_text = None
