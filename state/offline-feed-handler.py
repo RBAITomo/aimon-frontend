@@ -40,12 +40,15 @@ class OfflineFeedHandler:
 
         self._last_feed_ts = time.time()
         reduction = config.OFFLINE_FEED_HUNGER_REDUCTION
+        energy_restore = config.OFFLINE_FEED_ENERGY_RESTORE
         stats = self._update_callback(
-            hunger_delta=-reduction, energy_delta=0, happiness_delta=5
+            hunger_delta=-reduction, energy_delta=energy_restore, happiness_delta=5
         )
         self._journal.log_event("feed", {
             "hunger_reduction": reduction,
+            "energy_restore": energy_restore,
             "hunger": stats.get("hunger") if stats else None,
+            "energy": stats.get("energy") if stats else None,
         })
-        log.info("Offline feed applied (hunger -%d)", reduction)
+        log.info("Offline feed applied (hunger -%d, energy +%d)", reduction, energy_restore)
         return True

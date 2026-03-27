@@ -56,11 +56,16 @@ class BadgeScreenRenderer:
         return True  # let caller close screen
 
     def render(self, surface, badges_data=None, **kwargs):
-        """Render badge grid or detail view."""
-        badges = badges_data or []
-        if not badges:
-            self._render_empty(surface)
+        """Render badge grid or detail view.
+        badges_data=None means still loading; [] means loaded but no badges yet.
+        """
+        if badges_data is None:
+            self._render_loading(surface)
             return
+        if len(badges_data) == 0:
+            self._render_no_badges(surface)
+            return
+        badges = badges_data
 
         total = len(badges)
         total_pages = max(1, (total + _PER_PAGE - 1) // _PER_PAGE)
@@ -72,10 +77,16 @@ class BadgeScreenRenderer:
         else:
             self._render_grid(surface, badges, total_pages)
 
-    def _render_empty(self, surface):
+    def _render_loading(self, surface):
         title = self._font_title.render("Huy Hiệu", True, (255, 255, 255))
         surface.blit(title, (config.LCD_WIDTH // 2 - title.get_width() // 2, 8))
         msg = self._font_desc.render("Đang tải...", True, (140, 140, 140))
+        surface.blit(msg, (config.LCD_WIDTH // 2 - msg.get_width() // 2, config.LCD_HEIGHT // 2))
+
+    def _render_no_badges(self, surface):
+        title = self._font_title.render("Huy Hiệu", True, (255, 255, 255))
+        surface.blit(title, (config.LCD_WIDTH // 2 - title.get_width() // 2, 8))
+        msg = self._font_desc.render("Chua co huy hieu nao", True, (140, 140, 140))
         surface.blit(msg, (config.LCD_WIDTH // 2 - msg.get_width() // 2, config.LCD_HEIGHT // 2))
 
     def _render_grid(self, surface, badges, total_pages):

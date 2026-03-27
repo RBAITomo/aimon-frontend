@@ -581,6 +581,9 @@ class StateMachine:
             if self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
                 self._display._menu_renderer.badge_screen.toggle_detail()
                 return
+            # Refetch badges when entering badge screen (handles first-load failures)
+            if self._menu.current_item == MenuItem.BADGES and not self._menu.in_screen:
+                self._pet_handler.fetch_badges(config.ROBOT_ID)
             self._menu.enter()
             return
         if self._state != State.IDLE:
@@ -814,10 +817,10 @@ class StateMachine:
         self._finishing_turn = False
 
         if self._conversation_mode:
-            # Brief EMOTION display (~1s) then auto-resume
+            # Brief EMOTION display (~1s) then return to IDLE (no auto-resume)
             time.sleep(1.0)
+            self._conversation_mode = False
             self._set_state(State.IDLE)
-            threading.Thread(target=self._auto_resume_listening, daemon=True).start()
 
     def _playing_active(self):
         """Check if playback is still active (thread running and queue non-empty)."""

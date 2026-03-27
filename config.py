@@ -209,7 +209,7 @@ MENU_LABEL_FONT_SIZE = 24
 MENU_ITEM_NAMES = ["Trạng Thái", "Kho Đồ Ăn", "Huy hiệu", "Bản đồ", "Âm lượng", "Mini Game", "Sách Nấu Ăn"]
 
 # --- Volume ---
-VOLUME_DEFAULT = 80   # percent (0-100)
+VOLUME_DEFAULT = 100  # percent (0-100)
 VOLUME_STEP = 10      # percent per A/D press
 VOLUME_AMIXER_CARD = 1  # wm8960 soundcard
 VOLUME_AMIXER_CONTROLS = ["Headphone", "Speaker", "Speaker AC", "Speaker DC"]
@@ -227,6 +227,7 @@ OFFLINE_EVENT_MAX = 1000
 OFFLINE_DECAY_INTERVAL_S = 60
 OFFLINE_FEED_COOLDOWN_S = 30
 OFFLINE_FEED_HUNGER_REDUCTION = 15
+OFFLINE_FEED_ENERGY_RESTORE = 20
 OFFLINE_XP_INTERACTION = 5
 OFFLINE_XP_FEED = 3
 OFFLINE_DB_PATH = TURN_DB_PATH  # reuse same DB
