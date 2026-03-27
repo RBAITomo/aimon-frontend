@@ -30,10 +30,10 @@ SPRITE_DIR = os.path.join(os.path.dirname(__file__), "sprites")
 # --- Pet UI Layout (280x240 landscape) ---
 # Top stat bar region
 STAT_BAR_HEIGHT = 24
-STAT_BAR_WIDTH = 60          # wider screen allows more bar width
+STAT_BAR_WIDTH = 55          # narrowed to fit 3 bars + battery within corner-safe zone
 STAT_BAR_THICKNESS = 6
 STAT_BAR_Y = 9
-STAT_BAR_GAP = 8
+STAT_BAR_GAP = 6
 
 # Bottom XP bar region
 XP_BAR_HEIGHT = 24
@@ -83,6 +83,17 @@ STAGE_ASSET_MAP = {
 
 # Stages that support free movement (have multi-direction walking assets)
 MOVABLE_STAGES = {"child", "adult"}
+
+# Variant code -> asset folder mapping (matches assets/ directory names exactly)
+VARIANT_SPRITE_MAP = {
+    "chef_form": "Chef-form",
+    "bookworm_form": "Bookworm-form",
+    "quiz_master_form": "QuizMaster-form",
+}
+
+# Variant codes that have full 8-direction walking assets
+# Chef-form has 8-dir walking; Bookworm/QuizMaster have south-only (add here when confirmed)
+MOVABLE_VARIANTS = {"chef_form"}
 
 # Movement zone (lower half of content area, character wanders within)
 MOVE_ZONE_Y_MIN = CONTENT_Y_START + 5

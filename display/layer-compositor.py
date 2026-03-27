@@ -54,6 +54,9 @@ class LayerCompositor:
         # Evolution mode: solid black background, stat bars hidden
         self._evolution_mode = False
 
+        # Current variant code (set alongside _current_stage when stage=="variant")
+        self._current_variant = None
+
         # Background fade transition
         self._fade_alpha = 0          # 0 = no overlay, 255 = fully black
         self._fade_direction = 0      # 1 = fading out, -1 = fading in, 0 = idle
@@ -73,21 +76,22 @@ class LayerCompositor:
         self._evolution_mode = False
         self._base_dirty = True
 
-    def preload_stage(self, stage):
+    def preload_stage(self, stage, variant_code=None):
         """Preload sprites for a stage without switching current stage."""
-        self._sprite_mgr.load_stage(stage)
+        self._sprite_mgr.load_stage(stage, variant_code=variant_code)
 
-    def load_stage(self, stage):
+    def load_stage(self, stage, variant_code=None):
         """Load sprites for a new evolution stage."""
-        if stage == self._current_stage:
+        if stage == self._current_stage and variant_code == self._current_variant:
             return
         # Unload previous stage to free RAM
         if self._current_stage:
             self._sprite_mgr.unload_stage(self._current_stage)
         self._current_stage = stage
-        self._sprite_mgr.load_stage(stage)
+        self._current_variant = variant_code
+        self._sprite_mgr.load_stage(stage, variant_code=variant_code)
         self._base_dirty = True
-        log.info("Compositor loaded stage: %s", stage)
+        log.info("Compositor loaded stage: %s (variant: %s)", stage, variant_code)
 
     def set_background(self, bg_name):
         """Set background with fade transition.
@@ -131,9 +135,10 @@ class LayerCompositor:
         Returns:
             bool: True if current animation has finished (one-shot complete).
         """
-        # Ensure correct stage is loaded
-        if pet_state.stage != self._current_stage:
-            self.load_stage(pet_state.stage)
+        # Ensure correct stage + variant is loaded
+        effective_variant = pet_state.variant if pet_state.stage == "variant" else None
+        if pet_state.stage != self._current_stage or effective_variant != self._current_variant:
+            self.load_stage(pet_state.stage, variant_code=effective_variant)
 
         # Check if stats changed (mark base dirty)
         current_stats = (

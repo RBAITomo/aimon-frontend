@@ -40,16 +40,24 @@ class SpriteSheetManager:
         self._meta = {}
         self._loaded_stages = set()
 
-    def load_stage(self, stage):
-        """Load all animations for a given evolution stage."""
+    def load_stage(self, stage, variant_code=None):
+        """Load all animations for a given evolution stage.
+
+        For variant stage, variant_code must be provided to resolve asset folder.
+        """
         if stage in self._loaded_stages:
             return
         self._loaded_stages.add(stage)
 
         asset_folder = config.STAGE_ASSET_MAP.get(stage)
+
+        # Variant stage: resolve folder from VARIANT_SPRITE_MAP
+        if asset_folder is None and variant_code:
+            asset_folder = config.VARIANT_SPRITE_MAP.get(variant_code)
+
         if asset_folder:
             asset_path = os.path.join(config.ASSET_DIR, asset_folder)
-            self._load_from_assets(stage, asset_path)
+            self._load_from_assets(stage, asset_path, variant_code=variant_code)
         else:
             self._generate_placeholder(stage)
 
@@ -58,19 +66,24 @@ class SpriteSheetManager:
             self._load_static_rotation(stage)
 
         loaded = set(a for s, a, d in self._frames if s == stage)
-        log.info("Stage '%s' loaded animations: %s", stage, sorted(loaded))
+        log.info("Stage '%s' (variant=%s) loaded animations: %s", stage, variant_code, sorted(loaded))
 
-        if stage in config.MOVABLE_STAGES:
+        is_movable_variant = variant_code and variant_code in config.MOVABLE_VARIANTS
+        if stage in config.MOVABLE_STAGES or is_movable_variant:
             if (stage, "walking", "south") not in self._frames:
-                log.warning("Stage '%s' is movable but has no walking animation", stage)
+                log.warning("Stage '%s' (variant=%s) is movable but has no walking animation", stage, variant_code)
 
-    def _load_from_assets(self, stage, asset_path):
+    def _load_from_assets(self, stage, asset_path, variant_code=None):
         """Load animations from assets/{stage}/animations/{name}/{direction}/ dirs."""
         anim_dir = os.path.join(asset_path, "animations")
         if not os.path.isdir(anim_dir):
             return
 
-        is_movable = stage in config.MOVABLE_STAGES
+        # Variant stages check MOVABLE_VARIANTS; normal stages check MOVABLE_STAGES
+        if variant_code:
+            is_movable = variant_code in config.MOVABLE_VARIANTS
+        else:
+            is_movable = stage in config.MOVABLE_STAGES
 
         for folder_name in os.listdir(anim_dir):
             folder_path = os.path.join(anim_dir, folder_name)

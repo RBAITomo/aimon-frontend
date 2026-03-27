@@ -538,7 +538,15 @@ class StateMachine:
             elif self._menu.in_screen and self._menu.current_item == MenuItem.COOKBOOK:
                 self._display._menu_renderer.cookbook_screen.next_page()
             elif self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
-                self._display._menu_renderer.badge_screen.next_selection()
+                badge_screen = self._display._menu_renderer.badge_screen
+                if badge_screen.is_in_detail:
+                    # In detail view: A triggers badge evolution if eligible
+                    badge_code = badge_screen.trigger_evolve(self._pet_handler.badges_cache)
+                    if badge_code:
+                        self._trigger_badge_evolution(badge_code)
+                        self._menu.toggle()  # close menu after triggering
+                else:
+                    badge_screen.next_selection()
             else:
                 self._menu.next_item()
             return
@@ -662,6 +670,32 @@ class StateMachine:
 
     def _on_button_d_release(self):
         pass
+
+    # --- Badge Evolution ---
+
+    def _trigger_badge_evolution(self, badge_code):
+        """POST to badge evolution endpoint in a background thread.
+
+        On success the backend fires PetTransformEvent → WS broadcasts pet_transform
+        → on_pet_transform sets pet_state.stage/variant → sprites swap automatically.
+        """
+        import urllib.request
+        import urllib.error
+        backend_http = config.BACKEND_WS_URL.replace("ws://", "http://").replace("wss://", "https://")
+        url = f"{backend_http}/api/badges/{config.ROBOT_ID}/{badge_code}/evolve"
+
+        def _post():
+            try:
+                req = urllib.request.Request(url, data=b"", method="POST")
+                req.add_header("Content-Type", "application/json")
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    log.info("Badge evolution triggered: %s -> %s", badge_code, resp.read())
+            except urllib.error.HTTPError as e:
+                log.warning("Badge evolution failed: %s %s", e.code, e.read())
+            except Exception as e:
+                log.error("Badge evolution error: %s", e)
+
+        threading.Thread(target=_post, daemon=True, name="badge-evolve").start()
 
     # --- Quick-feed from inventory (Phase 03) ---
 

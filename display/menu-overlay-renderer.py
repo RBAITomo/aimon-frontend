@@ -50,12 +50,13 @@ class MenuOverlayRenderer:
         self._font = pygame.font.SysFont("dejavusans", config.MENU_LABEL_FONT_SIZE)
         self._font_small = pygame.font.SysFont("dejavusans", 14)
         self._overlay = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT), pygame.SRCALPHA)
-        # Load 32x32 menu icons (native size, no scaling needed)
+        # Load menu icons scaled to 64x64 (2× the 32x32 source PNG)
         self._menu_icons = {}
         for val, fname in _MENU_ICON_FILES.items():
             path = os.path.join(config.UI_ASSETS_PATH, fname)
             try:
-                self._menu_icons[val] = pygame.image.load(path).convert_alpha()
+                img = pygame.image.load(path).convert_alpha()
+                self._menu_icons[val] = pygame.transform.smoothscale(img, (64, 64))
             except (pygame.error, FileNotFoundError):
                 self._menu_icons[val] = None
         self._pet_screen = PetStatusScreenRenderer()
@@ -100,13 +101,13 @@ class MenuOverlayRenderer:
         name = config.MENU_ITEM_NAMES[idx]
         cx, cy = config.LCD_WIDTH // 2, config.LCD_HEIGHT // 2
 
-        # Draw 32x32 icon centered above text
+        # Draw 64x64 icon centered above text
         icon = self._menu_icons.get(idx)
         if icon:
-            surface.blit(icon, (cx - 16, cy - 34))
+            surface.blit(icon, (cx - 32, cy - 50))
 
         # Draw item name below icon (shifted down when icon present)
-        text_y = cy + 4 if icon else cy - self._font.size(name)[1] // 2
+        text_y = cy + 18 if icon else cy - self._font.size(name)[1] // 2
         text_surf = self._font.render(name, True, (255, 255, 255))
         surface.blit(text_surf, (cx - text_surf.get_width() // 2, text_y))
 
@@ -116,9 +117,9 @@ class MenuOverlayRenderer:
         surface.blit(arrow_l, (30, cy - arrow_l.get_height() // 2))
         surface.blit(arrow_r, (config.LCD_WIDTH - 50, cy - arrow_r.get_height() // 2))
 
-        # Item counter
+        # Item counter — shifted down to clear the larger icon + text
         counter = self._font_small.render(f"{idx + 1}/{len(config.MENU_ITEM_NAMES)}", True, (140, 140, 140))
-        surface.blit(counter, (cx - counter.get_width() // 2, cy + 30))
+        surface.blit(counter, (cx - counter.get_width() // 2, cy + 50))
 
         # Hint text
         hint = self._font_small.render("A/D: chon | B: vao | C: dong", True, (100, 100, 100))
@@ -133,6 +134,7 @@ class MenuOverlayRenderer:
             elif item == MenuItem.COOKBOOK:
                 renderer.render(surface, food_journal=food_journal)
             elif item == MenuItem.BADGES:
-                renderer.render(surface, badges_data=badges_data)
+                pet_stage = pet_state.stage if pet_state else "adult"
+                renderer.render(surface, badges_data=badges_data, pet_stage=pet_stage)
             else:
                 renderer.render(surface, pet_state=pet_state, food_inventory=food_inventory)

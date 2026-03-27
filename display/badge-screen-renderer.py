@@ -36,6 +36,31 @@ class BadgeScreenRenderer:
     def page(self):
         return self._page
 
+    @property
+    def is_in_detail(self):
+        """True when badge detail view is active."""
+        return self._detail_mode
+
+    def can_evolve_selected(self, badges_data, pet_stage):
+        """Return variant_code if selected badge can trigger evolution, else None."""
+        if not badges_data or self._selected >= len(badges_data):
+            return None
+        badge = badges_data[self._selected]
+        if not badge.get("earned") or not badge.get("variant_code"):
+            return None
+        if pet_stage != "adult":
+            return None
+        return badge.get("variant_code")
+
+    def trigger_evolve(self, badges_data):
+        """Return badge code for evolution trigger, or None if not eligible."""
+        if not badges_data or self._selected >= len(badges_data):
+            return None
+        badge = badges_data[self._selected]
+        if badge.get("earned") and badge.get("variant_code"):
+            return badge.get("code")
+        return None
+
     def next_selection(self):
         """Move selection right/down."""
         self._selected += 1
@@ -55,9 +80,10 @@ class BadgeScreenRenderer:
             return False  # handled internally
         return True  # let caller close screen
 
-    def render(self, surface, badges_data=None, **kwargs):
+    def render(self, surface, badges_data=None, pet_stage="adult", **kwargs):
         """Render badge grid or detail view.
         badges_data=None means still loading; [] means loaded but no badges yet.
+        pet_stage: current pet stage string (used to gate evolution hint in detail view).
         """
         if badges_data is None:
             self._render_loading(surface)
@@ -73,7 +99,7 @@ class BadgeScreenRenderer:
         self._selected = max(0, min(self._selected, total - 1))
 
         if self._detail_mode:
-            self._render_detail(surface, badges[self._selected])
+            self._render_detail(surface, badges[self._selected], pet_stage=pet_stage)
         else:
             self._render_grid(surface, badges, total_pages)
 
@@ -139,7 +165,7 @@ class BadgeScreenRenderer:
         hint = self._font_hint.render("A/D:chon B:xem C:dong", True, (100, 100, 100))
         surface.blit(hint, (config.LCD_WIDTH // 2 - hint.get_width() // 2, config.LCD_HEIGHT - 18))
 
-    def _render_detail(self, surface, badge):
+    def _render_detail(self, surface, badge, pet_stage="adult"):
         """Detail view for a single badge."""
         cx = config.LCD_WIDTH // 2
         y = 20
@@ -189,9 +215,18 @@ class BadgeScreenRenderer:
         xp = badge.get("xp_reward", 0)
         xp_surf = self._font_desc.render(f"+{xp} XP", True, (255, 220, 80))
         surface.blit(xp_surf, (cx - xp_surf.get_width() // 2, y))
+        y += 22
 
-        # Back hint
-        hint = self._font_hint.render("C: quay lai", True, (100, 100, 100))
+        # Evolution section (only when badge has evolution and pet is ADULT)
+        variant_code = badge.get("variant_code")
+        if variant_code and badge.get("earned") and pet_stage == "adult":
+            evo_label = self._font_desc.render("* Co the tien hoa!", True, (255, 200, 50))
+            surface.blit(evo_label, (cx - evo_label.get_width() // 2, y))
+            hint_text = "A:tien hoa  C:quay lai"
+        else:
+            hint_text = "C: quay lai"
+
+        hint = self._font_hint.render(hint_text, True, (100, 100, 100))
         surface.blit(hint, (cx - hint.get_width() // 2, config.LCD_HEIGHT - 18))
 
     def _load_sprite(self, badge_code):

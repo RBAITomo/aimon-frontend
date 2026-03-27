@@ -124,13 +124,18 @@ class PetEventHandler:
         log.info("Evolution: %s -> %s", old_stage, new_stage)
 
     def on_pet_transform(self, data):
-        """Handle variant transformation start."""
+        """Handle variant transformation start.
+
+        WS sends variant_code (from PetEventBridge). Fall back to 'variant'
+        for backwards compat with legacy messages.
+        """
         self._sfx.play("transform")
+        variant = data.get("variant_code") or data.get("variant")
         with self._pet_lock:
-            self._pet_state.variant = data.get("variant")
+            self._pet_state.variant = variant
             self._pet_state.stage = "variant"
         self._display.on_stats_changed()
-        log.info("Transform to variant: %s", data.get("variant"))
+        log.info("Transform to variant: %s", variant)
 
     def on_pet_transform_end(self, data):
         """Revert from variant to adult stage."""

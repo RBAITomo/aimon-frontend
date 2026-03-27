@@ -31,8 +31,9 @@ _BAT_UNKNOWN = (100, 100, 110)  # grey  unavailable
 _BAT_OUTLINE = (160, 160, 180)
 
 # Battery icon geometry (top-right of stat bar region)
-# Body: 21×6px outline; nub: 3×4px cap; fill: 19×4px inside body
-_BAT_X = 213
+# Positioned after all 3 stat bars to avoid overlap:
+#   start_x(21) + 3*(10 + STAT_BAR_WIDTH(55) + STAT_BAR_GAP(6)) - GAP + 4px margin = 232
+_BAT_X = 232
 _BAT_Y = 9   # same as STAT_BAR_Y
 _BAT_BODY_W = 21
 _BAT_BODY_H = 6
@@ -79,7 +80,7 @@ class StatBarRenderer:
             ("happiness", happiness, _HAPPINESS_FULL, _HAPPINESS_EMPTY, False),
         ]
 
-        x = 8
+        x = config.LCD_CORNER_HEIGHT + 1  # 21px — clears top-left rounded corner
         y = config.STAT_BAR_Y
         bar_w = config.STAT_BAR_WIDTH
         bar_h = config.STAT_BAR_THICKNESS
@@ -122,9 +123,9 @@ class StatBarRenderer:
         y = config.XP_BAR_Y
         bar_h = config.XP_BAR_HEIGHT_PX
 
-        # Level label
+        # Level label — x inset by corner height to avoid bottom-left clip
         label = self._level_font.render(f"Lv.{level}", True, _LABEL_COLOR)
-        surface.blit(label, (6, y - 1))
+        surface.blit(label, (config.LCD_CORNER_HEIGHT + 1, y - 1))
 
         # XP bar background
         bx = config.XP_BAR_X
