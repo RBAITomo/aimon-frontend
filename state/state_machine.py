@@ -1035,7 +1035,12 @@ class StateMachine:
                 for key in ("hunger", "energy", "happiness", "level", "xp",
                             "xp_for_next", "stage", "variant", "mood"):
                     if key in pet_status:
-                        setattr(self._pet_state, key, pet_status[key])
+                        val = pet_status[key]
+                        # Backend sends stage as uppercase enum (e.g. "CHILD"),
+                        # but sprite folders use lowercase
+                        if key == "stage" and isinstance(val, str):
+                            val = val.lower()
+                        setattr(self._pet_state, key, val)
                 self._pet_state.clamp_stats()
             self._display.on_stats_changed()
 
