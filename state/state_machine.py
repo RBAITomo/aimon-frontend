@@ -488,7 +488,19 @@ class StateMachine:
                 if self._wifi_setup_cancel.is_set():
                     return
 
-                # Step 2: Create hotspot AP
+                # Step 2: Try auto-connect to saved profiles first
+                self._wifi_setup_screen.set_status("Dang thu ket noi...")
+                auto_ssid = self._wifi_manager.auto_connect_saved(networks)
+                if auto_ssid:
+                    self._wifi_setup_screen.set_status(f"Da ket noi {auto_ssid}!")
+                    log.info("Auto-connected to saved profile: %s", auto_ssid)
+                    time.sleep(2)
+                    threading.Thread(target=self._reconnect_loop, daemon=True).start()
+                    return
+                if self._wifi_setup_cancel.is_set():
+                    return
+
+                # Step 3: No saved profile matched — create hotspot AP
                 self._wifi_setup_screen.set_status("Dang tao diem truy cap...")
                 gateway_ip = self._wifi_manager.create_hotspot(
                     config.WIFI_AP_SSID, config.WIFI_AP_PASSWORD,

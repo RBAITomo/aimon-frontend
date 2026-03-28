@@ -183,6 +183,32 @@ class WifiManager:
         except Exception as e:
             log.warning("Hotspot teardown error (may already be gone): %s", e)
 
+    # -- Auto-connect to saved profiles -----------------------------------------
+
+    def auto_connect_saved(self, available: list[dict]) -> str | None:
+        """Try connecting to saved profiles that match available networks.
+
+        Args:
+            available: [{ssid, signal}] from scan_available_networks().
+
+        Returns:
+            Connected SSID on success, None if no match or all failed.
+        """
+        available_ssids = {n["ssid"] for n in available}
+        profiles = self.get_profiles()
+        # Try each saved profile that's in range, strongest signal first
+        matches = [p for p in profiles if p["ssid"] in available_ssids]
+        # Sort by signal strength (match with available list order)
+        signal_map = {n["ssid"]: n["signal"] for n in available}
+        matches.sort(key=lambda p: signal_map.get(p["ssid"], 0), reverse=True)
+
+        for prof in matches:
+            ssid = prof["ssid"]
+            log.info("Auto-connect attempt: %s (signal=%d)", ssid, signal_map.get(ssid, 0))
+            if self.connect_to_profile(ssid, prof["password"]):
+                return ssid
+        return None
+
     # -- nmcli connection ------------------------------------------------------
 
     def connect_to_profile(self, ssid: str, password: str) -> bool:
