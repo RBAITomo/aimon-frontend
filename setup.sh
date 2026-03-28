@@ -52,6 +52,7 @@ echo "Configuring NetworkManager permissions for $AIMON_USER user..."
 sudo usermod -aG netdev "$AIMON_USER" 2>/dev/null || true
 POLKIT_RULE="/etc/polkit-1/localauthority/50-local.d/10-aimon-network.pkla"
 echo "Installing NetworkManager polkit rule..."
+sudo mkdir -p "$(dirname "$POLKIT_RULE")"
 sudo bash -c "cat > $POLKIT_RULE" <<PKLA
 [Allow $AIMON_USER to manage NetworkManager WiFi]
 Identity=unix-user:$AIMON_USER
