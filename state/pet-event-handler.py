@@ -253,6 +253,7 @@ class PetEventHandler:
                 req = urllib.request.Request(url, headers={
                     "Accept": "application/json",
                     "X-API-Key": config.AIMON_API_KEY,
+                    "User-Agent": "aimon-frontend/1.0",
                 })
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
