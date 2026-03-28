@@ -221,7 +221,7 @@ BADGE_GRID_ROWS = 2
 # --- Menu Overlay ---
 MENU_OVERLAY_ALPHA = 180
 MENU_LABEL_FONT_SIZE = 24
-MENU_ITEM_NAMES = ["Trạng Thái", "Kho Đồ Ăn", "Huy hiệu", "Bản đồ", "Âm lượng", "Mini Game", "Sách Nấu Ăn"]
+MENU_ITEM_NAMES = ["Trạng Thái", "Kho Đồ Ăn", "Huy hiệu", "Bản đồ", "Âm lượng", "Mini Game", "Sách Nấu Ăn", "WiFi"]
 
 # --- Volume ---
 VOLUME_DEFAULT = 100  # percent (0-100)

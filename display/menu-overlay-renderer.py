@@ -31,6 +31,9 @@ VolumeScreenRenderer = _vol_screen_mod.VolumeScreenRenderer
 _cookbook_screen_mod = importlib.import_module("display.cookbook-screen-renderer")
 CookbookScreenRenderer = _cookbook_screen_mod.CookbookScreenRenderer
 
+_wifi_screen_mod = importlib.import_module("display.wifi-screen-renderer")
+WifiScreenRenderer = _wifi_screen_mod.WifiScreenRenderer
+
 # Map MenuItem enum values (0-6) to PNG filenames in UI_ASSETS_PATH
 _MENU_ICON_FILES = {
     0: "icon-menu-pet-status.png",
@@ -40,6 +43,7 @@ _MENU_ICON_FILES = {
     4: "icon-menu-volume.png",
     5: "icon-menu-mini-game.png",
     6: "icon-menu-cookbook.png",
+    7: "icon-menu-wifi.png",
 }
 
 
@@ -65,6 +69,7 @@ class MenuOverlayRenderer:
         self._map_screen = MapScreenRenderer()
         self._vol_screen = VolumeScreenRenderer()
         self._cookbook_screen = CookbookScreenRenderer()
+        self._wifi_screen = WifiScreenRenderer()
         self._screen_map = {
             MenuItem.PET_STATUS: self._pet_screen,
             MenuItem.FOOD_INVENTORY: self._inv_screen,
@@ -72,6 +77,7 @@ class MenuOverlayRenderer:
             MenuItem.MAP: self._map_screen,
             MenuItem.VOLUME: self._vol_screen,
             MenuItem.COOKBOOK: self._cookbook_screen,
+            MenuItem.WIFI: self._wifi_screen,
         }
 
     @property
@@ -84,14 +90,14 @@ class MenuOverlayRenderer:
         """Expose badge renderer for navigation control."""
         return self._badge_screen
 
-    def render(self, surface, controller, pet_state=None, food_inventory=None, food_journal=None, volume_pct=80, badges_data=None):
+    def render(self, surface, controller, pet_state=None, food_inventory=None, food_journal=None, volume_pct=80, badges_data=None, wifi_manager=None):
         """Render menu overlay onto surface."""
         # Draw dark semi-transparent overlay
         self._overlay.fill((0, 0, 0, config.MENU_OVERLAY_ALPHA))
         surface.blit(self._overlay, (0, 0))
 
         if controller.in_screen:
-            self._render_screen(surface, controller.current_item, pet_state, food_inventory, food_journal, volume_pct, badges_data)
+            self._render_screen(surface, controller.current_item, pet_state, food_inventory, food_journal, volume_pct, badges_data, wifi_manager)
         else:
             self._render_item_select(surface, controller.current_item)
 
@@ -125,7 +131,7 @@ class MenuOverlayRenderer:
         hint = self._font_small.render("A/D: chon | B: vao | C: dong", True, (100, 100, 100))
         surface.blit(hint, (cx - hint.get_width() // 2, config.LCD_HEIGHT - 25))
 
-    def _render_screen(self, surface, item, pet_state, food_inventory, food_journal, volume_pct, badges_data):
+    def _render_screen(self, surface, item, pet_state, food_inventory, food_journal, volume_pct, badges_data, wifi_manager=None):
         """Delegate to appropriate sub-screen renderer."""
         renderer = self._screen_map.get(item)
         if renderer:
@@ -136,5 +142,7 @@ class MenuOverlayRenderer:
             elif item == MenuItem.BADGES:
                 pet_stage = pet_state.stage if pet_state else "adult"
                 renderer.render(surface, badges_data=badges_data, pet_stage=pet_stage)
+            elif item == MenuItem.WIFI:
+                renderer.render(surface, wifi_manager=wifi_manager)
             else:
                 renderer.render(surface, pet_state=pet_state, food_inventory=food_inventory)

@@ -14,6 +14,7 @@ class MenuItem(enum.Enum):
     VOLUME = 4
     MINI_GAME = 5
     COOKBOOK = 6
+    WIFI = 7
 
 
 class MenuState(enum.Enum):

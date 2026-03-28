@@ -1069,6 +1069,7 @@ class StateMachine:
             food_journal=self._food_journal,
             volume_pct=self._volume.volume,
             badges_data=self._pet_handler.badges_cache,
+            wifi_manager=self._wifi_manager,
         )
 
         # SFX ducking: reduce SFX volume during TTS playback
