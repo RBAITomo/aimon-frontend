@@ -535,6 +535,10 @@ class StateMachine:
         if self._menu.is_open:
             if self._menu.in_screen and self._menu.current_item == MenuItem.VOLUME:
                 self._volume.increase()
+            elif self._menu.in_screen and self._menu.current_item == MenuItem.WIFI:
+                self._menu.toggle()  # close menu, then scan QR
+                self._trigger_wifi_qr_scan()
+                return
             elif self._menu.in_screen and self._menu.current_item == MenuItem.COOKBOOK:
                 self._display._menu_renderer.cookbook_screen.next_page()
             elif self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
@@ -688,6 +692,8 @@ class StateMachine:
             try:
                 req = urllib.request.Request(url, data=b"", method="POST")
                 req.add_header("Content-Type", "application/json")
+                req.add_header("X-API-Key", config.AIMON_API_KEY)
+                req.add_header("User-Agent", "aimon-frontend/1.0")
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     log.info("Badge evolution triggered: %s -> %s", badge_code, resp.read())
             except urllib.error.HTTPError as e:
