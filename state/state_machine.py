@@ -1101,10 +1101,12 @@ class StateMachine:
         if state == State.EMOTION:
             self._emotion_tick += 1
 
-        # Character movement: wander during IDLE for movable stages
+        # Character movement: wander during IDLE for movable stages/variants
         with self._pet_lock:
             current_stage = self._pet_state.stage
-        is_movable = current_stage in config.MOVABLE_STAGES
+            current_variant = self._pet_state.variant
+        is_movable = (current_stage in config.MOVABLE_STAGES
+                      or (current_stage == "variant" and current_variant in config.MOVABLE_VARIANTS))
         self._movement.set_enabled(is_movable and state == State.IDLE)
         if is_movable:
             move_anim = self._movement.tick()

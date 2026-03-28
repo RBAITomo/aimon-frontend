@@ -93,8 +93,8 @@ VARIANT_SPRITE_MAP = {
 }
 
 # Variant codes that have full 8-direction walking assets
-# Foodie-form has 8-dir walking; Bookworm/QuizMaster have south-only (add here when confirmed)
-MOVABLE_VARIANTS = {"foodie,quiz_master_form,bookworm_form"}
+# Only foodie has walking; Bookworm/QuizMaster have south-only idle/speaking
+MOVABLE_VARIANTS = {"foodie"}
 
 # Movement zone (lower half of content area, character wanders within)
 MOVE_ZONE_Y_MIN = CONTENT_Y_START + 5
