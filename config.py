@@ -151,6 +151,14 @@ WIFI_QR_SCAN_TIMEOUT_S = 15
 LED_WIFI_SCAN = (0, 200, 255)  # cyan — QR WiFi scan in progress
 LONG_PRESS_THRESHOLD_MS = 1500  # hold ≥1.5s = long press (WiFi QR in offline)
 
+# --- WiFi Captive Portal ---
+WIFI_AP_SSID = "AIMON-Setup"
+WIFI_AP_PASSWORD = "aimon1234"       # WPA2 required by nmcli hotspot
+WIFI_AP_CON_NAME = "aimon-hotspot"   # nmcli connection name for cleanup
+WIFI_PORTAL_PORT = 80
+WIFI_SETUP_TIMEOUT_S = 120          # max seconds for entire captive portal flow
+LED_WIFI_SETUP = (0, 150, 255)      # blue — AP mode active
+
 # --- Vision (via backend API) ---
 BACKEND_HTTP_URL = os.getenv("BACKEND_HTTP_URL", os.getenv("BACKEND_URL", "http://localhost") + ":8080")
 VISION_ENABLED = CAMERA_ENABLED

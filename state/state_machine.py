@@ -57,6 +57,12 @@ OfflineGameEngine = _engine_mod.OfflineGameEngine
 _wifi_mod = importlib.import_module("hardware.wifi-manager")
 WifiManager = _wifi_mod.WifiManager
 
+_portal_mod = importlib.import_module("hardware.captive-portal-server")
+CaptivePortalServer = _portal_mod.CaptivePortalServer
+
+_setup_screen_mod = importlib.import_module("display.wifi-setup-screen-renderer")
+WifiSetupScreenRenderer = _setup_screen_mod.WifiSetupScreenRenderer
+
 _vol_mod = importlib.import_module("audio.volume-control")
 VolumeControl = _vol_mod.VolumeControl
 
@@ -143,6 +149,10 @@ class StateMachine:
         self._last_quest_trigger = 0.0
         self._vision = None
         self._wifi_manager = WifiManager(config.WIFI_PROFILES_PATH)
+        # WiFi captive portal setup state
+        self._wifi_setup_active = False
+        self._wifi_setup_cancel = threading.Event()
+        self._wifi_setup_screen = WifiSetupScreenRenderer()
         if config.CAMERA_ENABLED:
             self._camera = CameraCaptureService(min_interval_s=config.CAMERA_RATE_LIMIT_S)
             self._camera.initialize()
@@ -353,7 +363,7 @@ class StateMachine:
         if count >= 3:
             self._enter_shutdown_warning()
         elif count == 2 and self._offline:
-            self._trigger_wifi_qr_scan()
+            self._trigger_wifi_captive_portal()
         else:
             self._toggle_menu()
 
@@ -450,68 +460,110 @@ class StateMachine:
 
         threading.Thread(target=_capture_and_analyze, daemon=True).start()
 
-    def _trigger_wifi_qr_scan(self):
-        """Continuous QR scan loop (offline long-press). Runs in daemon thread."""
-        if not self._camera or not self._camera.available:
-            self._show_offline_text("Camera không khả dụng")
+    def _trigger_wifi_captive_portal(self):
+        """Start captive portal WiFi setup. Runs full flow in daemon thread."""
+        if self._wifi_setup_active:
+            log.warning("WiFi setup already active, ignoring")
             return
 
-        self._hat.set_rgb_tuple(config.LED_WIFI_SCAN)
-        self._show_offline_text("Đang quét mã QR...")
-        log.info("WiFi QR scan started (offline long-press)")
+        self._wifi_setup_active = True
+        self._wifi_setup_cancel.clear()
+        self._hat.set_rgb_tuple(config.LED_WIFI_SETUP)
+        self._wifi_setup_screen.set_status("Dang quet mang WiFi...")
+        log.info("WiFi captive portal setup started")
 
-        def _scan_loop():
-            deadline = time.time() + config.WIFI_QR_SCAN_TIMEOUT_S
-            found = False
+        def _setup_flow():
+            server = None
+            credentials = {}  # mutable container for callback
+            cred_event = threading.Event()
+
+            def _on_credentials(ssid, password):
+                credentials["ssid"] = ssid
+                credentials["password"] = password
+                cred_event.set()
+
             try:
-                while time.time() < deadline:
-                    try:
-                        jpeg_bytes = self._camera.capture_bytes(bypass_rate_limit=True)
-                    except Exception as e:
-                        log.warning("Camera capture failed: %s", e)
-                        time.sleep(0.5)
-                        continue
+                # Step 1: Scan available networks (before switching to AP mode)
+                networks = self._wifi_manager.scan_available_networks()
+                if self._wifi_setup_cancel.is_set():
+                    return
 
-                    if not jpeg_bytes:
-                        time.sleep(0.5)
-                        continue
+                # Step 2: Create hotspot AP
+                self._wifi_setup_screen.set_status("Dang tao diem truy cap...")
+                gateway_ip = self._wifi_manager.create_hotspot(
+                    config.WIFI_AP_SSID, config.WIFI_AP_PASSWORD,
+                    config.WIFI_AP_CON_NAME,
+                )
+                if not gateway_ip:
+                    self._wifi_setup_screen.set_status("Loi tao WiFi!")
+                    log.error("Hotspot creation failed")
+                    time.sleep(3)
+                    return
+                if self._wifi_setup_cancel.is_set():
+                    return
 
-                    result = self._wifi_manager.scan_qr_for_wifi(jpeg_bytes)
-                    if result:
-                        found = True
-                        ssid = result["ssid"]
-                        password = result["password"]
+                # Step 3: Start captive portal server
+                server = CaptivePortalServer(networks, _on_credentials)
+                server.start(port=config.WIFI_PORTAL_PORT)
 
-                        self._show_offline_text(f"Tìm thấy: {ssid}")
-                        log.info("WiFi QR decoded: ssid=%s", ssid)
-                        time.sleep(1.5)
+                # Step 4: Generate QR code and show on LCD
+                portal_url = f"http://{gateway_ip}"
+                self._wifi_setup_screen.set_portal_url(portal_url)
+                self._wifi_setup_screen.set_status("Dang cho ket noi...")
+                log.info("Portal ready at %s", portal_url)
 
-                        self._wifi_manager.add_profile(ssid, password)
-                        self._show_offline_text("Đang kết nối...")
+                # Step 5: Wait for credentials or cancel/timeout
+                deadline = time.time() + config.WIFI_SETUP_TIMEOUT_S
+                while not cred_event.is_set() and not self._wifi_setup_cancel.is_set():
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        self._wifi_setup_screen.set_status("Het thoi gian!")
+                        log.info("WiFi setup timed out after %ds", config.WIFI_SETUP_TIMEOUT_S)
+                        time.sleep(2)
+                        return
+                    cred_event.wait(timeout=min(1.0, remaining))
 
-                        success = self._wifi_manager.connect_to_profile(ssid, password)
-                        if success:
-                            self._show_offline_text("Kết nối thành công!")
-                            log.info("Connected to %s, triggering reconnect", ssid)
-                            time.sleep(2)
-                            threading.Thread(target=self._reconnect_loop, daemon=True).start()
-                        else:
-                            self._show_offline_text("Lỗi kết nối")
-                        break
+                if self._wifi_setup_cancel.is_set():
+                    log.info("WiFi setup cancelled by user")
+                    return
 
-                    time.sleep(0.5)
+                # Step 6: Teardown AP + server, then connect to target WiFi
+                server.stop()
+                server = None
+                self._wifi_manager.teardown_hotspot(config.WIFI_AP_CON_NAME)
 
-                if not found:
-                    self._show_offline_text("Không tìm thấy mã QR")
-                    log.info("WiFi QR scan timed out after %ds", config.WIFI_QR_SCAN_TIMEOUT_S)
+                ssid = credentials["ssid"]
+                password = credentials["password"]
+                self._wifi_setup_screen.set_status(f"Dang ket noi {ssid}...")
+                log.info("Connecting to WiFi: %s", ssid)
+
+                self._wifi_manager.add_profile(ssid, password)
+                success = self._wifi_manager.connect_to_profile(ssid, password)
+                if success:
+                    self._wifi_setup_screen.set_status("Ket noi thanh cong!")
+                    log.info("Connected to %s, triggering reconnect", ssid)
+                    time.sleep(2)
+                    threading.Thread(target=self._reconnect_loop, daemon=True).start()
+                else:
+                    self._wifi_setup_screen.set_status("Loi ket noi WiFi")
+                    log.warning("Failed to connect to %s", ssid)
+                    time.sleep(3)
 
             except Exception as e:
-                log.error("WiFi QR scan error: %s", e)
-                self._show_offline_text("Lỗi kết nối")
+                log.error("WiFi captive portal error: %s", e)
+                self._wifi_setup_screen.set_status("Loi ket noi")
+                time.sleep(2)
             finally:
-                self._hat.set_rgb_tuple(config.LED_OFFLINE)
+                if server:
+                    server.stop()
+                self._wifi_manager.teardown_hotspot(config.WIFI_AP_CON_NAME)
+                self._wifi_setup_screen.reset()
+                self._wifi_setup_active = False
+                self._hat.set_rgb_tuple(
+                    config.LED_OFFLINE if self._offline else config.LED_IDLE
+                )
 
-        threading.Thread(target=_scan_loop, daemon=True).start()
+        threading.Thread(target=_setup_flow, daemon=True).start()
 
     # --- Button release (main) ---
 
@@ -537,7 +589,7 @@ class StateMachine:
                 self._volume.increase()
             elif self._menu.in_screen and self._menu.current_item == MenuItem.WIFI:
                 self._menu.toggle()  # close menu, then scan QR
-                self._trigger_wifi_qr_scan()
+                self._trigger_wifi_captive_portal()
                 return
             elif self._menu.in_screen and self._menu.current_item == MenuItem.COOKBOOK:
                 self._display._menu_renderer.cookbook_screen.next_page()
@@ -614,6 +666,11 @@ class StateMachine:
     def _on_button_c_press(self):
         self._notify_activity()
         log.info("Button C pressed (state=%s, menu_open=%s)", self._state.value, self._menu.is_open)
+        # Cancel active WiFi captive portal setup
+        if self._wifi_setup_active:
+            self._wifi_setup_cancel.set()
+            log.info("WiFi setup cancelled by Button C")
+            return
         if self._state == State.MINI_GAME and self._mini_game_ctrl:
             result = self._mini_game_ctrl.on_button_c()
             if result == "exit":
@@ -1076,6 +1133,8 @@ class StateMachine:
             volume_pct=self._volume.volume,
             badges_data=self._pet_handler.badges_cache,
             wifi_manager=self._wifi_manager,
+            wifi_setup_active=self._wifi_setup_active,
+            wifi_setup_screen=self._wifi_setup_screen,
         )
 
         # SFX ducking: reduce SFX volume during TTS playback

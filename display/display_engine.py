@@ -48,7 +48,7 @@ class DisplayEngine:
 
         log.info("DisplayEngine initialized (%dx%d)", config.LCD_WIDTH, config.LCD_HEIGHT)
 
-    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None, menu=None, food_inventory=None, food_journal=None, volume_pct=80, badges_data=None, wifi_manager=None):
+    def render(self, tick, pet_state, text=None, badge_popup=None, food_mgr=None, menu=None, food_inventory=None, food_journal=None, volume_pct=80, badges_data=None, wifi_manager=None, wifi_setup_active=False, wifi_setup_screen=None):
         """Main render call — delegates to compositor.
 
         Args:
@@ -70,8 +70,14 @@ class DisplayEngine:
             food_mgr.render(self._surface)
         if badge_popup:
             badge_popup.render(self._surface, tick)
-        if menu and menu.is_open:
-            self._menu_renderer.render(self._surface, menu, pet_state=pet_state, food_inventory=food_inventory, food_journal=food_journal, volume_pct=volume_pct, badges_data=badges_data, wifi_manager=wifi_manager)
+        if wifi_setup_active and wifi_setup_screen and not (menu and menu.is_open):
+            # Full-screen WiFi setup overlay (triggered by double-tap offline)
+            overlay = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT))
+            overlay.fill((0, 0, 0))
+            wifi_setup_screen.render(overlay)
+            self._surface.blit(overlay, (0, 0))
+        elif menu and menu.is_open:
+            self._menu_renderer.render(self._surface, menu, pet_state=pet_state, food_inventory=food_inventory, food_journal=food_journal, volume_pct=volume_pct, badges_data=badges_data, wifi_manager=wifi_manager, wifi_setup_active=wifi_setup_active, wifi_setup_screen=wifi_setup_screen)
         if self._camera_flash_frames > 0:
             alpha = int(200 * (self._camera_flash_frames / 4))
             flash = pygame.Surface((config.LCD_WIDTH, config.LCD_HEIGHT))

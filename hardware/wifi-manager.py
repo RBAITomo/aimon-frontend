@@ -96,6 +96,93 @@ class WifiManager:
             log.error("QR decode error: %s", e)
         return None
 
+    # -- Network scanning -------------------------------------------------------
+
+    @staticmethod
+    def scan_available_networks() -> list[dict]:
+        """Scan nearby WiFi networks via nmcli. Returns [{ssid, signal}] sorted by signal desc."""
+        try:
+            r = subprocess.run(
+                ["nmcli", "-t", "-f", "SSID,SIGNAL", "dev", "wifi", "list", "--rescan", "yes"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode != 0:
+                log.warning("nmcli wifi list failed: %s", r.stderr.strip())
+                return []
+            # Deduplicate SSIDs, keep highest signal
+            seen = {}
+            for line in r.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.rsplit(":", 1)
+                if len(parts) < 2:
+                    continue
+                ssid = parts[0].strip()
+                if not ssid:
+                    continue
+                try:
+                    signal = int(parts[1])
+                except ValueError:
+                    signal = 0
+                if ssid not in seen or signal > seen[ssid]:
+                    seen[ssid] = signal
+            result = [{"ssid": s, "signal": sig} for s, sig in seen.items()]
+            result.sort(key=lambda x: x["signal"], reverse=True)
+            log.info("Scanned %d unique WiFi networks", len(result))
+            return result
+        except subprocess.TimeoutExpired:
+            log.error("nmcli wifi scan timed out")
+            return []
+        except Exception as e:
+            log.error("WiFi scan error: %s", e)
+            return []
+
+    # -- AP hotspot management --------------------------------------------------
+
+    def create_hotspot(self, ap_ssid: str, ap_password: str, con_name: str) -> str | None:
+        """Create WiFi AP via nmcli hotspot. Returns gateway IP or None on failure."""
+        try:
+            r = subprocess.run(
+                ["nmcli", "device", "wifi", "hotspot", "ifname", "wlan0",
+                 "con-name", con_name, "ssid", ap_ssid, "password", ap_password],
+                capture_output=True, text=True, timeout=15,
+            )
+            if r.returncode != 0:
+                log.error("Hotspot creation failed: %s", r.stderr.strip())
+                return None
+            # Extract gateway IP from connection
+            r2 = subprocess.run(
+                ["nmcli", "-t", "-f", "IP4.ADDRESS", "connection", "show", con_name],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in r2.stdout.strip().split("\n"):
+                if ":" in line:
+                    addr = line.split(":", 1)[1].strip()
+                    gateway_ip = addr.split("/")[0]  # "10.42.0.1/24" -> "10.42.0.1"
+                    log.info("Hotspot created: ssid=%s, gateway=%s", ap_ssid, gateway_ip)
+                    return gateway_ip
+            # Fallback if IP parsing fails
+            log.warning("Could not parse gateway IP, using default 10.42.0.1")
+            return "10.42.0.1"
+        except subprocess.TimeoutExpired:
+            log.error("Hotspot creation timed out")
+            return None
+        except Exception as e:
+            log.error("Hotspot error: %s", e)
+            return None
+
+    @staticmethod
+    def teardown_hotspot(con_name: str):
+        """Remove hotspot connection. Idempotent — safe if already gone."""
+        try:
+            subprocess.run(
+                ["nmcli", "connection", "delete", con_name],
+                capture_output=True, timeout=10,
+            )
+            log.info("Hotspot '%s' removed", con_name)
+        except Exception as e:
+            log.warning("Hotspot teardown error (may already be gone): %s", e)
+
     # -- nmcli connection ------------------------------------------------------
 
     def connect_to_profile(self, ssid: str, password: str) -> bool:

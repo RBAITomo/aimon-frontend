@@ -90,14 +90,14 @@ class MenuOverlayRenderer:
         """Expose badge renderer for navigation control."""
         return self._badge_screen
 
-    def render(self, surface, controller, pet_state=None, food_inventory=None, food_journal=None, volume_pct=80, badges_data=None, wifi_manager=None):
+    def render(self, surface, controller, pet_state=None, food_inventory=None, food_journal=None, volume_pct=80, badges_data=None, wifi_manager=None, wifi_setup_active=False, wifi_setup_screen=None):
         """Render menu overlay onto surface."""
         # Draw dark semi-transparent overlay
         self._overlay.fill((0, 0, 0, config.MENU_OVERLAY_ALPHA))
         surface.blit(self._overlay, (0, 0))
 
         if controller.in_screen:
-            self._render_screen(surface, controller.current_item, pet_state, food_inventory, food_journal, volume_pct, badges_data, wifi_manager)
+            self._render_screen(surface, controller.current_item, pet_state, food_inventory, food_journal, volume_pct, badges_data, wifi_manager, wifi_setup_active, wifi_setup_screen)
         else:
             self._render_item_select(surface, controller.current_item)
 
@@ -131,7 +131,7 @@ class MenuOverlayRenderer:
         hint = self._font_small.render("A/D: chon | B: vao | C: dong", True, (100, 100, 100))
         surface.blit(hint, (cx - hint.get_width() // 2, config.LCD_HEIGHT - 25))
 
-    def _render_screen(self, surface, item, pet_state, food_inventory, food_journal, volume_pct, badges_data, wifi_manager=None):
+    def _render_screen(self, surface, item, pet_state, food_inventory, food_journal, volume_pct, badges_data, wifi_manager=None, wifi_setup_active=False, wifi_setup_screen=None):
         """Delegate to appropriate sub-screen renderer."""
         renderer = self._screen_map.get(item)
         if renderer:
@@ -143,6 +143,10 @@ class MenuOverlayRenderer:
                 pet_stage = pet_state.stage if pet_state else "adult"
                 renderer.render(surface, badges_data=badges_data, pet_stage=pet_stage)
             elif item == MenuItem.WIFI:
-                renderer.render(surface, wifi_manager=wifi_manager)
+                # Show captive portal QR screen during active setup
+                if wifi_setup_active and wifi_setup_screen:
+                    wifi_setup_screen.render(surface)
+                else:
+                    renderer.render(surface, wifi_manager=wifi_manager)
             else:
                 renderer.render(surface, pet_state=pet_state, food_inventory=food_inventory)

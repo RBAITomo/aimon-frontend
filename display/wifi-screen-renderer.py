@@ -86,7 +86,7 @@ class WifiScreenRenderer:
                 y += 18
 
         # Hint at bottom
-        hint = self._font_small.render("A: them WiFi | C: quay lai", True, (100, 100, 100))
+        hint = self._font_small.render("A: Kết nối WiFi | C: quay lại", True, (100, 100, 100))
         surface.blit(hint, (cx - hint.get_width() // 2, config.LCD_HEIGHT - 22))
 
     def _draw_signal_bars(self, surface, x, y, signal):
