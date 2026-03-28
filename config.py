@@ -238,7 +238,7 @@ VOLUME_AMIXER_CARD = 1  # wm8960 soundcard
 VOLUME_AMIXER_CONTROLS = ["Headphone", "Speaker", "Speaker AC", "Speaker DC"]
 
 # --- Quest ---
-QUEST_TRIGGER_COOLDOWN_S = 5
+QUEST_TRIGGER_COOLDOWN_S = 3 * 3600  # 3 hours
 
 # --- Mini-game (Food Catcher) ---
 MINI_GAME_ENERGY_COST = 20
