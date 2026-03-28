@@ -87,14 +87,14 @@ MOVABLE_STAGES = {"child", "adult"}
 
 # Variant code -> asset folder mapping (matches assets/ directory names exactly)
 VARIANT_SPRITE_MAP = {
-    "chef_form": "Chef-form",
+    "foodie": "foodie-form",
     "bookworm_form": "Bookworm-form",
     "quiz_master_form": "QuizMaster-form",
 }
 
 # Variant codes that have full 8-direction walking assets
-# Chef-form has 8-dir walking; Bookworm/QuizMaster have south-only (add here when confirmed)
-MOVABLE_VARIANTS = {"chef_form"}
+# Foodie-form has 8-dir walking; Bookworm/QuizMaster have south-only (add here when confirmed)
+MOVABLE_VARIANTS = {"foodie,quiz_master_form,bookworm_form"}
 
 # Movement zone (lower half of content area, character wanders within)
 MOVE_ZONE_Y_MIN = CONTENT_Y_START + 5

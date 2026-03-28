@@ -609,10 +609,15 @@ class StateMachine:
                 badge_screen = self._display._menu_renderer.badge_screen
                 if badge_screen.is_in_detail:
                     # In detail view: A triggers badge evolution if eligible
-                    badge_code = badge_screen.trigger_evolve(self._pet_handler.badges_cache)
+                    badges = self._pet_handler.badges_cache
+                    badge_code = badge_screen.trigger_evolve(badges)
                     if badge_code:
-                        self._trigger_badge_evolution(badge_code)
+                        # Optimistic: apply transform immediately from cache
+                        variant_code = badge_screen.can_evolve_selected(badges, self._pet_state.stage)
+                        if variant_code:
+                            self._pet_handler.optimistic_transform(variant_code)
                         self._menu.toggle()  # close menu after triggering
+                        self._trigger_badge_evolution(badge_code, revert_on_fail=True)
                 else:
                     badge_screen.next_selection()
             else:
@@ -657,9 +662,10 @@ class StateMachine:
             if self._menu.in_screen and self._menu.current_item == MenuItem.BADGES:
                 self._display._menu_renderer.badge_screen.toggle_detail()
                 return
-            # Refetch badges when entering badge screen (handles first-load failures)
+            # Only fetch badges if cache is empty (first load or prior failure)
             if self._menu.current_item == MenuItem.BADGES and not self._menu.in_screen:
-                self._pet_handler.fetch_badges(config.ROBOT_ID)
+                if not self._pet_handler.has_badges_cache:
+                    self._pet_handler.fetch_badges(config.ROBOT_ID)
             self._menu.enter()
             return
         if self._state != State.IDLE:
@@ -746,11 +752,12 @@ class StateMachine:
 
     # --- Badge Evolution ---
 
-    def _trigger_badge_evolution(self, badge_code):
+    def _trigger_badge_evolution(self, badge_code, revert_on_fail=False):
         """POST to badge evolution endpoint in a background thread.
 
-        On success the backend fires PetTransformEvent → WS broadcasts pet_transform
-        → on_pet_transform sets pet_state.stage/variant → sprites swap automatically.
+        On success the backend fires PetTransformEvent → WS broadcasts pet_transform.
+        With optimistic mode (revert_on_fail=True), transform is already applied locally;
+        backend POST persists the change. On failure, reverts the optimistic update.
         """
         import urllib.request
         import urllib.error
@@ -764,11 +771,17 @@ class StateMachine:
                 req.add_header("X-API-Key", config.AIMON_API_KEY)
                 req.add_header("User-Agent", "aimon-frontend/1.0")
                 with urllib.request.urlopen(req, timeout=10) as resp:
-                    log.info("Badge evolution triggered: %s -> %s", badge_code, resp.read())
+                    log.info("Badge evolution confirmed: %s -> %s", badge_code, resp.read())
             except urllib.error.HTTPError as e:
                 log.warning("Badge evolution failed: %s %s", e.code, e.read())
+                if revert_on_fail:
+                    self._pet_handler.revert_transform()
+                    self._last_bubble_text = "Chưa thể tiến hóa lúc này!"
             except Exception as e:
                 log.error("Badge evolution error: %s", e)
+                if revert_on_fail:
+                    self._pet_handler.revert_transform()
+                    self._last_bubble_text = "Chưa thể tiến hóa lúc này!"
 
         threading.Thread(target=_post, daemon=True, name="badge-evolve").start()
 
@@ -778,7 +791,7 @@ class StateMachine:
         """Pop oldest food from inventory and feed to pet."""
         item = self._food_inventory.pop()
         if not item:
-            self._last_bubble_text = "Kho trong, chup anh de them do an!"
+            self._last_bubble_text = "Kho trống, chụp ảnh để thêm đồ ăn vào!"
             return
         self._food_mgr.add(item["sprite_key"], item["food_name"], eat_immediately=True)
         self._ws.send_feed_confirm(item["food_name"], item["sprite_key"])

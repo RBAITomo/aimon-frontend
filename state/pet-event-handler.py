@@ -128,12 +128,17 @@ class PetEventHandler:
 
         WS sends variant_code (from PetEventBridge). Fall back to 'variant'
         for backwards compat with legacy messages.
+        Skips if already applied optimistically (same variant already active).
         """
-        self._sfx.play("transform")
         variant = data.get("variant_code") or data.get("variant")
         with self._pet_lock:
+            # Skip if optimistic transform already applied this variant
+            if self._pet_state.variant == variant and self._pet_state.stage == "variant":
+                log.debug("Ignoring duplicate transform WS (already applied optimistically)")
+                return
             self._pet_state.variant = variant
             self._pet_state.stage = "variant"
+        self._sfx.play("transform")
         self._display.on_stats_changed()
         log.info("Transform to variant: %s", variant)
 
@@ -240,6 +245,29 @@ class PetEventHandler:
         with self._pet_lock:
             # Use `is not None` — empty list [] is a valid "loaded but no badges" state
             return list(self._badges_cache) if self._badges_cache is not None else None
+
+    @property
+    def has_badges_cache(self):
+        """True if badge cache is populated (not None)."""
+        with self._pet_lock:
+            return self._badges_cache is not None
+
+    def optimistic_transform(self, variant_code):
+        """Optimistically apply variant transform without waiting for WS."""
+        self._sfx.play("transform")
+        with self._pet_lock:
+            self._pet_state.variant = variant_code
+            self._pet_state.stage = "variant"
+        self._display.on_stats_changed()
+        log.info("Optimistic transform to variant: %s", variant_code)
+
+    def revert_transform(self):
+        """Revert optimistic transform if backend rejects."""
+        with self._pet_lock:
+            self._pet_state.variant = None
+            self._pet_state.stage = "adult"
+        self._display.on_stats_changed()
+        log.warning("Reverted optimistic transform (backend rejected)")
 
     def clear_quest(self):
         self._quest_text = None
