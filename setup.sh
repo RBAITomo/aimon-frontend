@@ -18,7 +18,7 @@ if [ ! -d "$WHISPLAY_DIR" ]; then
     sudo git clone https://github.com/PiSugar/whisplay.git --depth 1 "$WHISPLAY_DIR"
 fi
 echo "Installing Whisplay HAT driver..."
-sudo bash "$WHISPLAY_DIR/Driver/install_wm8960_drive.sh"
+(cd "$WHISPLAY_DIR/Driver" && sudo bash install_wm8960_drive.sh)
 REBOOT_NEEDED=true
 
 # ── 2. Additional system packages (not covered by Whisplay) ─────────
