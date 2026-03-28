@@ -34,6 +34,23 @@ echo "Installing Python dependencies..."
 # Create data directory for SQLite
 mkdir -p "$SCRIPT_DIR/data"
 
+# Allow service user to manage WiFi (hotspot creation for captive portal setup)
+# Detect current user (typically 'aimon' or 'pi')
+AIMON_USER="${SUDO_USER:-$(whoami)}"
+echo "Configuring NetworkManager permissions for $AIMON_USER user..."
+sudo usermod -aG netdev "$AIMON_USER" 2>/dev/null || true
+# Polkit rule to authorize WiFi hotspot without root
+POLKIT_RULE="/etc/polkit-1/localauthority/50-local.d/10-aimon-network.pkla"
+echo "Installing NetworkManager polkit rule..."
+sudo bash -c "cat > $POLKIT_RULE" <<PKLA
+[Allow $AIMON_USER to manage NetworkManager WiFi]
+Identity=unix-user:$AIMON_USER
+Action=org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+PKLA
+
 # Enable SPI if not already enabled
 CONFIG_FILE="/boot/firmware/config.txt"
 if [ ! -f "$CONFIG_FILE" ]; then
