@@ -250,7 +250,10 @@ class PetEventHandler:
         def _fetch():
             url = f"{config.BACKEND_HTTP_URL}/api/badges/{user_id}"
             try:
-                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                req = urllib.request.Request(url, headers={
+                    "Accept": "application/json",
+                    "X-API-Key": config.AIMON_API_KEY,
+                })
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                 with self._pet_lock:
