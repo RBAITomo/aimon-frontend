@@ -48,7 +48,7 @@ class BadgeScreenRenderer:
         badge = badges_data[self._selected]
         if not badge.get("earned") or not badge.get("variant_code"):
             return None
-        if pet_stage != "adult":
+        if pet_stage not in ("adult", "child"):
             return None
         return badge.get("variant_code")
 
@@ -217,9 +217,9 @@ class BadgeScreenRenderer:
         surface.blit(xp_surf, (cx - xp_surf.get_width() // 2, y))
         y += 22
 
-        # Evolution section (only when badge has evolution and pet is ADULT)
+        # Evolution section (when badge has evolution and pet is ADULT or CHILD)
         variant_code = badge.get("variant_code")
-        if variant_code and badge.get("earned") and pet_stage == "adult":
+        if variant_code and badge.get("earned") and pet_stage in ("adult", "child"):
             evo_label = self._font_desc.render("* Co the tien hoa!", True, (255, 200, 50))
             surface.blit(evo_label, (cx - evo_label.get_width() // 2, y))
             hint_text = "A:tien hoa  C:quay lai"

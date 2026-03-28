@@ -253,9 +253,13 @@ class PetEventHandler:
             return self._badges_cache is not None
 
     def optimistic_transform(self, variant_code):
-        """Optimistically apply variant transform without waiting for WS."""
+        """Optimistically apply variant transform without waiting for WS.
+
+        Saves pre-transform stage so revert can restore correctly (child or adult).
+        """
         self._sfx.play("transform")
         with self._pet_lock:
+            self._pre_transform_stage = self._pet_state.stage
             self._pet_state.variant = variant_code
             self._pet_state.stage = "variant"
         self._display.on_stats_changed()
@@ -265,7 +269,7 @@ class PetEventHandler:
         """Revert optimistic transform if backend rejects."""
         with self._pet_lock:
             self._pet_state.variant = None
-            self._pet_state.stage = "adult"
+            self._pet_state.stage = getattr(self, "_pre_transform_stage", "adult")
         self._display.on_stats_changed()
         log.warning("Reverted optimistic transform (backend rejected)")
 
